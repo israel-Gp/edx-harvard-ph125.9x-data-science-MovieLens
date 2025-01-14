@@ -875,10 +875,19 @@ cramerv_ass <- function(data, verbose = FALSE, bias.correct = TRUE){
         
       }
       else{
-        
-        cramer_v[i,n] <- cramerV(x = data[,i][[1]], data[,n][[1]], verbose = verbose,
-                                 bias.correct = bias.correct)
-        
+        if((i==1 & n==2)|(i==2 & n==1)){
+          
+          # Film-User interaction not considered for model
+          
+          cramer_v[i,n] <- 0
+          
+        }
+        else{
+          
+          cramer_v[i,n] <- cramerV(x = data[,i][[1]], data[,n][[1]], verbose = verbose,
+                                   bias.correct = bias.correct)
+          
+        }
       }
     }
   }
