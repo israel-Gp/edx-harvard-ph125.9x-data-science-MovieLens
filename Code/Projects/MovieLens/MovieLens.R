@@ -875,10 +875,19 @@ cramerv_ass <- function(data, verbose = FALSE, bias.correct = TRUE){
         
       }
       else{
-        
-        cramer_v[i,n] <- cramerV(x = data[,i][[1]], data[,n][[1]], verbose = verbose,
-                                 bias.correct = bias.correct)
-        
+        if((i==1 & n==2)|(i==2 & n==1)){
+          
+          # Film-User interaction not considered for model
+          
+          cramer_v[i,n] <- 0
+          
+        }
+        else{
+          
+          cramer_v[i,n] <- cramerV(x = data[,i][[1]], data[,n][[1]], verbose = verbose,
+                                   bias.correct = bias.correct)
+          
+        }
       }
     }
   }
@@ -1042,11 +1051,16 @@ preprocess_days_n_model <- preProcess(train[,4],
 train_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(train))) %>% 
   predict(preprocess_days_n_model,.)
 
-test %>% 
+test <- test %>% 
   left_join(film_genres,
             by = 'movie_id') %>% 
-  left_join(days_n) %>% 
+  mutate(review_date = as_date(timestamp)) %>% 
+  left_join(days_n,
+            by = c('review_date' = 'date')) %>% 
   select(all_of(names(train_0)))
+
+test_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(test))) %>% 
+  predict(preprocess_days_n_model,.)
 
 # Train Model -------------------------------------------------------------
 
