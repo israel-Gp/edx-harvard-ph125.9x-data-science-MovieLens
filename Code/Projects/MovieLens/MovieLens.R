@@ -454,15 +454,19 @@ max(train$review_date)
 
 # Floor min date and ceiling ax date by year
 
-days_n <- tibble(date = seq(floor_date(min(train$review_date), unit = 'year'),
-                            ceiling_date(max(train$review_date),unit = 'year'), by = 'day')) %>% 
-  mutate(days_n = row_number() - 1)
+days_n <- function(date, start_date = '1996-01-01'){
+  
+  days <- interval(ymd(start_date),date)/days(1)
+  
+  return(days)
+  
+}
 
 train <- train %>% 
-  left_join(days_n, by = c('review_date' = 'date')) %>% 
+  mutate(days_n = days_n(review_date)) %>% 
   relocate(days_n, .after = review_date)
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test','mean_rating_label','mean_rating','working_cores','days_n'))
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test','mean_rating_label','mean_rating','working_cores'))
 
 ## Rating Distribution by IDs ---------------------------------------------
 
@@ -592,7 +596,7 @@ all_mean_bc_plot
 # OLS with L2 regularization recommended as it has an closed form solution 
 # rating = film effects + user effects
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'mean_rating','working_cores','days_n'))
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'mean_rating','working_cores'))
 
 ### Matrix Sparsity -------------------------------------------------------
 
@@ -628,7 +632,7 @@ spacity_plot
 # users and films will have different effects on prediction
 # user effect + film effects further validated
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'mean_rating','working_cores','days_n'))
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'mean_rating','working_cores'))
 
 ## Genre Effects ----------------------------------------------------------
 
@@ -781,7 +785,7 @@ train <- train %>%
   relocate(genre, .before = 'genre_1') %>% 
   select(-starts_with('genre_'))
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores','days_n'))
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores'))
 
 # Explicit Feature Selection ----------------------------------------------
 
@@ -846,7 +850,7 @@ tibble(predictor = names(train_num),
 train <- train %>% 
   select(-all_of(cor_remove))
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores','days_n'))
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores'))
 
 ## Categorical Correlations -----------------------------------------------
 
@@ -928,7 +932,7 @@ cat_cor_remove <- 'is_am'
 train <- train %>% 
   select(-all_of(cat_cor_remove))
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores','days_n'))
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores'))
 
 ## Linear Combos ----------------------------------------------------------
 
@@ -942,7 +946,7 @@ train_lc
 
 # No Linear Combos
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores','days_n'))
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test', 'film_genres','working_cores'))
 
 ## Boruta -----------------------------------------------------------------
 
@@ -962,7 +966,26 @@ user_boruta <- Boruta(rating~.,
 plot(user_boruta)
 
 # Genre and release year are the most important features for users 
-# while days_n is a disant thrid
+# while days_n is a distant thrid
+# User ID is also considered not relevant in this study
+# one of these features may be leaking film effects too strongly
+# genre has a near 1:1 relation to film 
+# release year however will also have this effect
+# release year to be dropped and user Boruta to be repeated
+
+set.seed(1949, sample.kind = 'Rounding')
+user_boruta <- Boruta(rating~.,
+                      data = select(train,
+                                    -all_of(c('movie_id','release_year'))),
+                      getImp = getImpXgboost,
+                      maxRuns = 50,
+                      doTrace = 3)
+
+plot(user_boruta)
+
+# User ID not considered relevant
+# still 3rd overall in this study
+# Use varrank to determine training order and second pass importance
 
 user_predictors <- getSelectedAttributes(user_boruta)[c(1:3)]
 
@@ -984,59 +1007,37 @@ film_boruta <- Boruta(rating~.,
 plot(film_boruta)
 
 # film_id is nearly the only important feature
-# confirm via varrank
 
 film_predictors <- getSelectedAttributes(film_boruta)[1:2]
 
 ## Varrank ----------------------------------------------------------------
 
-### User Varrank ----------------------------------------------------------
-
-user_varrank <- varrank(select(train,all_of(c('rating',user_predictors))),
-        method = 'estevez',
-        variable.important = 'rating',
-        discretization.method = 'sturges',
-        algorithm = 'forward',
-        scheme = 'mid',
-        verbose = TRUE
-        )
-
-summary(user_varrank)
-
-plot(user_varrank)
-
-# genre may become redundant when user_id is already trained
-# This mostly matched the inverse of the boruta wrapper
-# release year is the least relevant feature
-# will proceede with genre and days_n
-
-user_predictors <- user_varrank$ordered.var[1:3]
-
-### Film Varrank ----------------------------------------------------------
-
-film_varrank <- varrank(select(train,all_of(c('rating',film_predictors))),
+all_varrank <- varrank(select(train,all_of(c('rating',user_predictors,film_predictors))),
                         method = 'estevez',
                         variable.important = 'rating',
                         discretization.method = 'sturges',
                         algorithm = 'forward',
                         scheme = 'mid',
-                        verbose = TRUE)
+                        verbose = TRUE
+)
 
-summary(film_varrank)
+summary(all_varrank)
 
-plot(film_varrank)
+plot(all_varrank)
 
-# The wrapper inverts the findings of boruta ion terms of importance
-# will onl;y train film in this instance
-
-film_predictors <- 'movie_id'
+# Day_n after film is selected has negative redundancy score to rating
+# days_n unlikely to have solo effects
+# Boruta features validated
 
 ## Final Training Data ----------------------------------------------------
 
-train <- train %>%
-  select(all_of(unique(c('rating',user_predictors, film_predictors))))
+# Solo effects are limited to user and film
+# interactions are user+days+genre & film+days_n
 
-clear_memory(keep = c(   'train',   'test',   'final_holdout_test','film_genres', 'working_cores','days_n'))
+train <- train %>%
+  select(all_of(unique(c('rating',all_varrank$ordered.var))))
+
+clear_memory(keep = c(   'train',   'test',   'final_holdout_test','film_genres', 'working_cores'))
 
 # Data Preparation --------------------------------------------------------
 
@@ -1044,23 +1045,16 @@ preprocess_rating_model <- preProcess(as.data.frame(train[,1]),
                                method = c('center','scale','BoxCox'),
                                verbose = TRUE)
 
-preprocess_days_n_model <- preProcess(train[,4],
-           method = 'range',
-           verbose = TRUE)
-
-train_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(train))) %>% 
-  predict(preprocess_days_n_model,.)
+train_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(train)))
 
 test <- test %>% 
   left_join(film_genres,
             by = 'movie_id') %>% 
-  mutate(review_date = as_date(timestamp)) %>% 
-  left_join(days_n,
-            by = c('review_date' = 'date')) %>% 
+  mutate(review_date = as_date(timestamp),
+         days_n = days_n(review_date)) %>% 
   select(all_of(names(train_0)))
 
-test_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(test))) %>% 
-  predict(preprocess_days_n_model,.)
+test_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(test)))
 
 # Train Model -------------------------------------------------------------
 
@@ -1071,335 +1065,652 @@ rmse_calc <- function(data){
     pivot_longer(cols = everything(),
                  names_to = 'model',
                  values_to = 'rmse',
-                 names_transform = \(x) as.factor(str_to_title(str_remove(x,'y_hat_')))) %>% 
+                 names_transform = \(x) as.factor(str_to_title(str_replace_all(str_remove(x,'y_hat_'),'_',' ')))) %>% 
     mutate(model = fct_reorder(model,rmse))
   
   return(rmses)
   
 }
 
-rmse_plot <- function(data, label_accuracy = 0.001){
+rmse_plot <- function(data, label_accuracy = 0.001, label_nudge = 0.025){
   
   plot <- data %>% 
     ggplot(aes(rmse, model, label = label_number(accuracy = label_accuracy)(rmse))) +
     geom_segment(aes(xend = 0, yend = model)) +
     geom_point() +
-    geom_text(nudge_x = 0.025) +
+    geom_text(nudge_x = label_nudge) +
     xlab('RMSE') +
-    ylab('Model')
+    ylab('Model') +
+    ggtitle('Model RMSE')
   
   return(plot)
   
 }
 
-sgd_lambda <- function(x, g_x, beta, y, lambda_initial = 0, learning_rate = 0.5 , epochs = 2000, seed = 1142){
-  
-  # Model
-  lambda_model <- function(x, g_x, lambda, beta){
-    return(g_x/(g_x + lambda) * beta * x)
-    
-  }
-  
-  # Presets
-  n <- length(beta)
-  lambda <- lambda_initial
-  loss_table <- tibble(lambda = numeric(),
-                       rmse = numeric())
-  
-  for (epoch in 1:epochs) {
-    for (i in n) {
-      
-      # Random Data Sample
-      set.seed(seed, sample.kind = 'Rounding')
-      index <- sample(1:n, 1)
-      beta_i <- beta[index]
-      g_x_i <- g_x[index]
-      x_i <- x[index]
-      lambda_i <- lambda[index]
-      y_i <- y[index]
-      
-      # Compute Gradients
-      y_pred <- lambda_model(x_i, g_x_i,lambda,beta_i)
-      grad_lambda <- -2 * beta_i * x_i * (y_i - y_pred)
-      
-      # Current RMSE
-      rmse <- RMSE(y_pred, y)
-      
-      # Update Loss Table
-      loss_table <- loss_table %>% 
-        add_row(lambda = lambda,
-                rmse = rmse)
-      
-      # Update Model Parameters
-      lambda <- lambda + learning_rate * grad_lambda
-      
-    }
-  }
-  
-  lambda_min <- loss_table %>% 
-    slice_min(rmse, with_ties = FALSE) %>% 
-    pull(lambda)
-  
-  return(lambda_min)
-  
-}
+# Train Model -------------------------------------------------------------
 
-## Intercept --------------------------------------------------------------
+# All models to start by training the intercept
 
-# When data is centered and scaled the model intercept is 0 due to 
-# OLS closed form solution being the mean
+## Model 1 ----------------------------------------------------------------
+
+# model 1 will train features by film, user, user~days, user~genre and 
+# film~days
+
+### Intercept -------------------------------------------------------------
+
+# Due to using BoxCox transform the mean is zero
 
 b0 <- 0
 
-test %>% 
-  mutate(b0 = b0) %>% 
-  mutate(y_hat_intercept = b0) %>% 
+test_0 %>% 
+  mutate(intercept = b0,
+         y_hat_intercept = b0) %>% 
   rmse_calc() %>% 
   rmse_plot()
-  
+
+# RMSE with the Intercept at 0 is 1.000
+
+# Custom function to add betas
 train_betas <- function(data){
   
   data <-   data %>% 
-    mutate(b0 = b0)
+    mutate(b0 = b0,
+           y_hat_intercept = b0,
+           train_y_hat = rating - b0) %>% 
+    relocate(train_y_hat, .after = last_col())
   
   return(data)
   
 }
 
-# RMSE with Intercept 1.000
+train_0 <- train_0 %>% 
+  train_betas()
 
-## Film Effects -----------------------------------------------------------
+### Film Effects ----------------------------------------------------------
 
-b_film <- train_0 %>% 
-  group_by(movie_id) %>% 
-  mutate(b_i = rating - b0) %>% 
-  summarise(b_film_xy = sum(b_i),
-            b_film_gx = sum(!is.na(b_i))) %>% 
-  ungroup()
+repeats <- 5
+lambda_max <- 7
+lambda_length <- 50
+lambda_p <- 0.8
 
-train_betas <- function(data){
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(1432, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
   
-  data <-   data %>% 
-    mutate(b0 = b0) %>% 
-    left_join(b_film)
-  
-  return(data)
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'movie_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(movie_id) %>% 
+      summarise(beta = sum(train_y_hat)/(n() + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('movie_id')) %>% 
+      select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
   
 }
 
-train_0 %>% 
-  train_betas() %>% 
-  mutate(y_hat_intercept = b0,
-         y_hat_film = b0 + b_film_xy/b_film_gx) %>% 
-  rmse_calc() %>% 
-  rmse_plot()
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
 
-# RMSE with film effects is 0.889  
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
 
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
 
-## Penalized Film Effects -------------------------------------------------
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
 
-film_ids <- 1:length(unique(as.integer(train_0$movie_id)))
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
 
-set.seed(2134, sample.kind = 'Rounding')
-film_index <- createMultiFolds(film_ids)
+film_betas <- train_0 %>%
+  group_by(movie_id) %>%
+  summarise(b_film = sum(train_y_hat)/(n() + lambda_min), .groups = 'drop')
 
-film_best_lambda <- train_0 %>% 
+test_0 %>%
   train_betas() %>%
-  nest() %>% 
-  expand_grid(film_index) %>% 
-  mutate(new_data = map2(data, film_index, \(x,y) filter(x, movie_id %in% unlist(y)),
-                         .progress = TRUE)) %>% 
-  mutate(lambda = map_dbl(new_data,\(x) sgd_lambda(x = rep(1,nrow(x)),
-                                               y = pluck(x,'new_data',1)$rating - pluck(x,'new_data',1)$b0,
-                                               g_x = pluck(x,'new_data',1)$b_film_gx,
-                                               beta = pluck(x,'new_data',1)$b_film_xy/pluck(x,'new_data',1)$b_film_gx
-  ), .progress = TRUE)) %>% 
-  summarise(best_lambda = mean(lambda, na.rm = TRUE)) %>% 
-  pull(best_lambda)
-
-film_best_lambda
-
-# Best Lambda is 0
-# No penalization required
-
-b_film <- b_film %>% 
-  mutate(b1 = b_film_xy/b_film_gx) %>% 
-  select(all_of(c('movie_id','b1')))
-
-train_0 %>% 
-  train_betas() %>% 
-  mutate(y_hat_intercept = b0,
-         y_hat_film = b0 + b1) %>% 
-  rmse_calc() %>% 
+  left_join(film_betas) %>%
+  mutate(y_hat_film = b0 + b_film) %>%
+  rmse_calc() %>%
   rmse_plot()
 
-## Film Time Effects ------------------------------------------------------
+lambdas_best <- tibble(feature = 'Film',
+                       lambda = lambda_min)
 
-b_film_days <- train_0 %>% 
-  train_betas() %>% 
-  mutate(b_i = rating - b0 - b1) %>% 
-  group_by(movie_id) %>% 
-  summarise(b_film_xy = sum(b_i*days_n),
-            b_film_gx = sum(days_n^2))
+# Film effects using lambda of ~1.43 improves the model to an RMSE of 0.890
 
-train_0 %>% 
-  train_betas() %>% 
-  left_join(b_film_days) %>% 
-  mutate(y_hat_intercept = b0,
-         y_hat_film = b0 + b1,
-         y_hat_film_days = b0 + b1 + b_film_xy/b_film_gx
-         ) %>% 
-  rmse_calc() %>% 
-  rmse_plot()
-
-# RMSE of Film-Days is 0.895
-# An increase from the previous RMSE and a candidate for dropping
-#  Explore Penalized effects
-
-## Penalized Film Time Effects --------------------------------------------
-
-film_time_best_lambda <- train_0 %>% 
-  train_betas() %>% 
-  left_join(b_film_days) %>% 
-  nest() %>% 
-  expand_grid(film_index) %>% 
-  mutate(new_data = map2(data, film_index, \(x,y) filter(x, movie_id %in% unlist(y)),
-                         .progress = TRUE)) %>% 
-  mutate(lambda = map_dbl(new_data,\(x) sgd_lambda(x = pluck(x,'new_data',1)$b_film_xy,
-                                                   y = pluck(x,'new_data',1)$rating - pluck(x,'new_data',1)$b0 - pluck(x,'new_data',1)$b1,
-                                                   g_x = pluck(x,'new_data',1)$b_film_gx,
-                                                   beta = pluck(x,'new_data',1)$b_film_xy/pluck(x,'new_data',1)$b_film_gx
-  ), .progress = TRUE)) %>% 
-  summarise(best_lambda = mean(lambda, na.rm = TRUE)) %>% 
-  pull(best_lambda)
-
-film_time_best_lambda
-
-# Best Lambda is 0
-# Penalization did not produce a better model
-# Film-time not added to model
-
-## User Effects -----------------------------------------------------------
-
-b_user <- train_0 %>% 
-  train_betas() %>% 
-  mutate(b_i = rating - b0 - b1) %>% 
-  group_by(user_id) %>% 
-  summarise(b_user_xy = sum(b_i),
-            b_user_gx = sum(!is.na(b_i))) %>% 
-  ungroup()
-
-train_0 %>% 
-  train_betas() %>% 
-  left_join(b_user) %>% 
-  mutate(y_hat_intercept = b0,
-         y_hat_film = b0 + b1,
-         y_hat_user = b0 + b1 + b_user_xy/b_user_gx
-  ) %>% 
-  rmse_calc() %>% 
-  rmse_plot()
-
-# RMSE with user effects is 0.807
-# Model improved
-# Study potential penalization for an improved model
-
+# Update train_betas
 train_betas <- function(data){
   
   data <-   data %>% 
-    mutate(b0 = b0) %>% 
-    left_join(b_film) %>% 
-    left_join(b_user)
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           train_y_hat = rating - b0 - b_film) %>% 
+    relocate(train_y_hat, .after = last_col())
   
   return(data)
   
 }
 
-## Penalized User Effects -------------------------------------------------
+train_0 <- train_0 %>% 
+  train_betas()
 
-user_ids <- 1:length(unique(as.integer(train_0$user_id)))
+### User Effects ----------------------------------------------------------
 
-set.seed(2134, sample.kind = 'Rounding')
-user_index <- createMultiFolds(user_ids)
+repeats <- 5
+lambda_max <- 7
+lambda_length <- 50
+lambda_p <- 0.8
 
-user_best_lambda <- train_0 %>% 
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(1834, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'user_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(user_id) %>% 
+      summarise(beta = sum(train_y_hat)/(n() + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('user_id')) %>% 
+      select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+
+user_betas <- train_0 %>%
+  group_by(user_id) %>%
+  summarise(b_user = sum(train_y_hat)/(n() + lambda_min), .groups = 'drop')
+
+test_0 %>%
   train_betas() %>%
-  nest() %>% 
-  expand_grid(user_index) %>% 
-  mutate(new_data = map2(data, user_index, \(x,y) filter(x, user_id %in% unlist(y)),
-                         .progress = TRUE)) %>% 
-  mutate(lambda = map_dbl(new_data,\(x) sgd_lambda(x = rep(1,nrow(x)),
-                                                   y = pluck(x,'new_data',1)$rating - pluck(x,'new_data',1)$b0 - pluck(x,'new_data',1)$b1,
-                                                   g_x = pluck(x,'new_data',1)$b_user_gx,
-                                                   beta = pluck(x,'new_data',1)$b_user_xy/pluck(x,'new_data',1)$b_user_gx
-  ), .progress = TRUE)) %>% 
-  summarise(best_lambda = mean(lambda, na.rm = TRUE)) %>% 
-  pull(best_lambda)
-
-user_best_lambda
-
-# Best Lambda is 0
-# No penalization required
-
-b_user <- b_user %>% 
-  mutate(b2 = b_user_xy/b_user_gx) %>% 
-  select(all_of(c('user_id','b2')))
-
-train_0 %>% 
-  train_betas() %>% 
-  mutate(y_hat_intercept = b0,
-         y_hat_film = b0 + b1,
-         y_hat_user = b0 + b1 + b2) %>% 
-  rmse_calc() %>% 
+  left_join(user_betas) %>%
+  mutate(y_hat_user = b0 + b_film + b_user) %>%
+  rmse_calc() %>%
   rmse_plot()
 
-## User Time Effects ------------------------------------------------------
+# User effects using a lambda of 0 improves the model to an RMSE of 0.816
 
-b_user_days <- train_0 %>% 
-  train_betas() %>% 
-  mutate(b_i = rating - b0 - b1 - b2) %>% 
-  group_by(user_id) %>% 
-  summarise(b_user_xy = sum(b_i*days_n),
-            b_user_gx = sum(days_n^2))
+lambdas_best <- lambdas_best %>% 
+  add_row(feature = 'User', lambda = lambda_min)
 
-train_0 %>% 
-  train_betas() %>% 
-  left_join(b_user_days) %>% 
-  mutate(y_hat_intercept = b0,
-         y_hat_film = b0 + b1,
-         y_hat_user = b0 + b1 + b2,
-         y_hat_user_days = b0 + b1 + b2 + b_user_xy/b_user_gx
-  ) %>% 
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    left_join(user_betas) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           train_y_hat = rating - b0 - b_film - b_user) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
+
+### User Days -------------------------------------------------------------
+
+repeats <- 5
+lambda_max <- 7
+lambda_length <- 50
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(636, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'user_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(user_id) %>% 
+      summarise(beta = sum(train_y_hat * days_n)/(sum(days_n^2) + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('user_id')) %>% 
+      select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+
+user_days_betas <- train_0 %>%
+  group_by(user_id) %>%
+  summarise(b_user_days = sum(train_y_hat * days_n)/(sum(days_n^2) + lambda_min), .groups = 'drop')
+
+test_0 %>%
+  train_betas() %>%
+  left_join(user_days_betas) %>%
+  mutate(y_hat_user_days = b0 + b_film + b_user + b_user_days*days_n) %>%
+  rmse_calc() %>%
+  rmse_plot(label_accuracy = 0.0001)
+
+# User Days with a lambda of 5.714 improves the model to an RMSE of 0.8159
+
+lambdas_best <- lambdas_best %>% 
+  add_row(feature = 'User Days', lambda = lambda_min)
+
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    left_join(user_betas) %>% 
+    left_join(user_days_betas) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           y_hat_user_days = b0 + b_film + b_user + b_user_days * days_n,
+           train_y_hat = rating - b0 - b_film - b_user - b_user_days * days_n) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
+
+### User Genre ------------------------------------------------------------
+
+repeats <- 5
+lambda_max <- 2
+lambda_length <- 25
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(738, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'user_id') %>% 
+      semi_join(train_set, by = 'genre')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(user_id,genre) %>% 
+      summarise(beta = sum(train_y_hat)/(n() + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('user_id','genre')) %>% 
+      mutate(across('beta',\(x) replace_na(x,0))) %>% 
+      select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+
+user_genre_betas <- train_0 %>%
+  group_by(user_id,genre) %>%
+  summarise(b_user_genre = sum(train_y_hat)/(n() + lambda_min), .groups = 'drop')
+
+test_0 %>%
+  train_betas() %>%
+  left_join(user_genre_betas) %>%
+  mutate(b_user_genre = replace_na(b_user_genre,0),
+         y_hat_user_genre = b0 + b_film + b_user + b_user_days*days_n + b_user_genre) %>%
+  rmse_calc() %>%
+  rmse_plot(label_accuracy = 0.0001)
+
+# User~Genre doe snot improve the model and will be dropped
+
+### Film Days -------------------------------------------------------------
+
+repeats <- 5
+lambda_max <- 7
+lambda_length <- 20
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(636, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'movie_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(movie_id) %>% 
+      summarise(beta = sum(train_y_hat * days_n)/(sum(days_n^2) + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('movie_id')) %>% 
+      select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+
+film_days_betas <- train_0 %>%
+  group_by(movie_id) %>%
+  summarise(b_film_days = sum(train_y_hat * days_n)/(sum(days_n^2) + lambda_min), .groups = 'drop')
+
+test_0 %>%
+  train_betas() %>%
+  left_join(film_days_betas) %>%
+  mutate(y_hat_film_days = b0 + b_film + b_user + b_user_days*days_n + b_film_days*days_n) %>%
+  rmse_calc() %>%
+  rmse_plot(label_accuracy = 0.0001)
+
+# Training Film~Days with a lambda of 2.6947 improved the model to an RMSE of 0.8138
+
+lambdas_best <- lambdas_best %>% 
+  add_row(feature = 'Film Days', lambda = lambda_min)
+
+# While minimal effects time does play a part in a predicting rating
+# both time dependent features with higher lambdas than film's
+# implying that users and films with far less squared spread of time in days
+# require
+
+test_0 %>%
+  train_betas() %>%
+  left_join(film_days_betas) %>%
+  mutate(y_hat_film_days = b0 + b_film + b_user + b_user_days*days_n + b_film_days*days_n) %>%
   rmse_calc() %>% 
-  rmse_plot()
+  pull(rmse) %>% 
+  min()
 
-# RMSE of User-Days is 0.973
-# An increase from the previous RMSE and a candidate for dropping
-# Explore Penalized effects
+# Final Model 1 RMSE on the test set for model selection is 0.8137912
 
-## Penalized User Time Effects --------------------------------------------
+## Model 2 ----------------------------------------------------------------
 
-user_time_best_lambda <- train_0 %>% 
-  train_betas() %>% 
-  left_join(b_user_days) %>% 
-  nest() %>% 
-  expand_grid(user_index) %>% 
-  mutate(new_data = map2(data, user_index, \(x,y) filter(x, movie_id %in% unlist(y)),
-                         .progress = TRUE)) %>% 
-  mutate(lambda = map_dbl(new_data,\(x) sgd_lambda(x = pluck(x,'new_data',1)$b_user_xy,
-                                                   y = pluck(x,'new_data',1)$rating - pluck(x,'new_data',1)$b0 - pluck(x,'new_data',1)$b1 - pluck(x,'new_data',1)$b2,
-                                                   g_x = pluck(x,'new_data',1)$b_user_gx,
-                                                   beta = pluck(x,'new_data',1)$b_user_xy/pluck(x,'new_data',1)$b_user_gx
-  ), .progress = TRUE)) %>% 
-  summarise(best_lambda = mean(lambda, na.rm = TRUE)) %>% 
-  pull(best_lambda)
-
-user_time_best_lambda
-
-# Best Lambda is 0
-# Penalization did not produce a better model
-# User-time not added to model
-
-# Timer -------------------------------------------------------------------
-
-tictoc::toc()
+# Model 2 will train all categorical features first then time features
