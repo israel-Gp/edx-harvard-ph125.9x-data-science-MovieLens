@@ -1094,7 +1094,8 @@ rmse_plot <- function(data, label_accuracy = 0.001, label_nudge = 0.025){
 ## Model 1 ----------------------------------------------------------------
 
 # model 1 will train features by film, user, user~days, user~genre and 
-# film~days
+# film~days in the event that a features is not applied a model 2 will be trained
+# with the remaining features and an ensemble model will follow
 
 ### Intercept -------------------------------------------------------------
 
@@ -1153,7 +1154,7 @@ for (r in 1:repeats) {
     all_names <- names(train_0)
     
     train_set <- train_0[repetitions[,r],]
-    temp <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
     
     test_set <- temp %>% 
       semi_join(train_set, by = 'movie_id')
@@ -1226,7 +1227,7 @@ test_0 %>%
 lambdas_best <- tibble(feature = 'Film',
                        lambda = lambda_min)
 
-# Film effects using lambda of ~1.43 improves the model to an RMSE of 0.890
+# Film effects using lambda of ~2.86 improves the model to an RMSE of 0.890
 
 # Update train_betas
 train_betas <- function(data){
@@ -1273,7 +1274,7 @@ for (r in 1:repeats) {
     all_names <- names(train_0)
     
     train_set <- train_0[repetitions[,r],]
-    temp <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
     
     test_set <- temp %>% 
       semi_join(train_set, by = 'user_id')
@@ -1343,7 +1344,7 @@ test_0 %>%
   rmse_calc() %>%
   rmse_plot()
 
-# User effects using a lambda of 0 improves the model to an RMSE of 0.816
+# User effects using a lambda of ~2.71 improves the model to an RMSE of 0.816
 
 lambdas_best <- lambdas_best %>% 
   add_row(feature = 'User', lambda = lambda_min)
@@ -1370,16 +1371,28 @@ train_0 <- train_0 %>%
 
 ### User Days -------------------------------------------------------------
 
+train_0 %>% 
+  group_by(user_id) %>% 
+  summarise(bd = sum(days_n^2)) %>% 
+  ggplot(aes(bd)) +
+  geom_density(fill = '#FF0000', alpha = 0.25) +
+  scale_x_log10()
+
+# User Days lambda will be sensitive to not only the sum of square days_n but also
+# the sum of product between the response train_y_hat and days_n
+# lambda will be significantly large in order to affect these values
+# Larger spread of lambdas will be required
+
 repeats <- 5
-lambda_max <- 7
-lambda_length <- 50
+lambda_max <- 1e10
+lambda_length <- 100
 lambda_p <- 0.8
 
 lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
                        repeats = 1:repeats,
                        rmse = 0)
 
-set.seed(636, sample.kind = 'Rounding')
+set.seed(1741, sample.kind = 'Rounding')
 repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
                                    times = repeats,
                                    p = lambda_p,
@@ -1395,7 +1408,7 @@ for (r in 1:repeats) {
     all_names <- names(train_0)
     
     train_set <- train_0[repetitions[,r],]
-    temp <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
     
     test_set <- temp %>% 
       semi_join(train_set, by = 'user_id')
@@ -1463,9 +1476,11 @@ test_0 %>%
   left_join(user_days_betas) %>%
   mutate(y_hat_user_days = b0 + b_film + b_user + b_user_days*days_n) %>%
   rmse_calc() %>%
-  rmse_plot(label_accuracy = 0.0001)
+  rmse_plot(label_accuracy = 0.00001)
 
-# User Days with a lambda of 5.714 improves the model to an RMSE of 0.8159
+# User effects using a lambda of ~5.9 billion improves the model to an RMSE of 0.811547
+# A marginal improvement
+# day_n is likely a useful feature when users have amassed sufficient days of use
 
 lambdas_best <- lambdas_best %>% 
   add_row(feature = 'User Days', lambda = lambda_min)
@@ -1495,8 +1510,8 @@ train_0 <- train_0 %>%
 ### User Genre ------------------------------------------------------------
 
 repeats <- 5
-lambda_max <- 2
-lambda_length <- 25
+lambda_max <- 50
+lambda_length <- 50
 lambda_p <- 0.8
 
 lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
@@ -1519,7 +1534,7 @@ for (r in 1:repeats) {
     all_names <- names(train_0)
     
     train_set <- train_0[repetitions[,r],]
-    temp <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
     
     test_set <- temp %>% 
       semi_join(train_set, by = 'user_id') %>% 
@@ -1592,13 +1607,50 @@ test_0 %>%
   rmse_calc() %>%
   rmse_plot(label_accuracy = 0.0001)
 
-# User~Genre doe snot improve the model and will be dropped
+# User~Genre with a lambda of ~30.6 improves the model to an RMSE of 0.8093
+
+lambdas_best <- lambdas_best %>% 
+  add_row(feature = 'User Genre', lambda = lambda_min)
+
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    left_join(user_betas) %>% 
+    left_join(user_days_betas) %>% 
+    left_join(user_genre_betas) %>% 
+    mutate(across(starts_with('b_'),\(x) replace_na(x,0))) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           y_hat_user_days = b0 + b_film + b_user + b_user_days * days_n,
+           y_hat_user_genre = b0 + b_film + b_user + b_user_days * days_n + b_user_genre,
+           train_y_hat = rating - b0 - b_film - b_user - b_user_days * days_n - b_user_genre) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
 
 ### Film Days -------------------------------------------------------------
 
+train_0 %>% 
+  group_by(movie_id) %>% 
+  summarise(bd = sum(days_n^2)) %>% 
+  ggplot(aes(bd)) +
+  geom_density(fill = '#FF0000', alpha = 0.25) +
+  scale_x_log10()
+
+# As with User Days this feature is sensitive to large scales of days
+
 repeats <- 5
-lambda_max <- 7
-lambda_length <- 20
+lambda_max <- 1e11
+lambda_length <- 100
 lambda_p <- 0.8
 
 lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
@@ -1621,7 +1673,7 @@ for (r in 1:repeats) {
     all_names <- names(train_0)
     
     train_set <- train_0[repetitions[,r],]
-    temp <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
     
     test_set <- temp %>% 
       semi_join(train_set, by = 'movie_id')
@@ -1691,26 +1743,59 @@ test_0 %>%
   rmse_calc() %>%
   rmse_plot(label_accuracy = 0.0001)
 
-# Training Film~Days with a lambda of 2.6947 improved the model to an RMSE of 0.8138
+# Training Film~Days with a lambda of ~40 billion improved the model to an RMSE of 0.8081
 
 lambdas_best <- lambdas_best %>% 
   add_row(feature = 'Film Days', lambda = lambda_min)
 
 # While minimal effects time does play a part in a predicting rating
-# both time dependent features with higher lambdas than film's
-# implying that users and films with far less squared spread of time in days
-# require
+# All features trained, Model 2 not required
 
-test_0 %>%
-  train_betas() %>%
-  left_join(film_days_betas) %>%
-  mutate(y_hat_film_days = b0 + b_film + b_user + b_user_days*days_n + b_film_days*days_n) %>%
-  rmse_calc() %>% 
-  pull(rmse) %>% 
-  min()
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    left_join(user_betas) %>% 
+    left_join(user_days_betas) %>% 
+    left_join(user_genre_betas) %>% 
+    left_join(film_days_betas) %>% 
+    mutate(across(starts_with('b_'),\(x) replace_na(x,0))) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           y_hat_user_days = b0 + b_film + b_user + b_user_days * days_n,
+           y_hat_user_genre = b0 + b_film + b_user + b_user_days * days_n + b_user_genre,
+           y_hat_film_days = b0 + b_film + b_user + b_user_days * days_n + b_user_genre + b_film_days * days_n,
+           y_hat_final = b0 + b_film + b_user + b_user_days * days_n + b_user_genre + b_film_days * days_n,
+           train_y_hat = rating - b0 - b_film - b_user - b_user_days * days_n - b_user_genre,
+           ) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
 
-# Final Model 1 RMSE on the test set for model selection is 0.8137912
+# Final Test --------------------------------------------------------------
 
-## Model 2 ----------------------------------------------------------------
+final_holdout_test_f <- final_holdout_test %>% 
+  as_tibble() %>% 
+  clean_names() %>% 
+  select(all_of(c('rating','user_id','movie_id','timestamp'))) %>% 
+  mutate(review_date = as_date(as_datetime(timestamp)),
+         user_id = as_factor(user_id),
+         movie_id = as_factor(movie_id),
+         ) %>% 
+  left_join(film_genres) %>% 
+  mutate(days_n = days_n(review_date)) %>% 
+  select(any_of(names(train_0)))
 
-# Model 2 will train all categorical features first then time features
+final_holdout_test_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(final_holdout_test_f)))
+
+final_holdout_test_0 %>% 
+  train_betas() %>% 
+  select(all_of(c('rating','y_hat_final'))) %>% 
+  rmse_calc()
+
+# Final RMSE 0.807
