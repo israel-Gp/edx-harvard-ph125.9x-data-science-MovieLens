@@ -1,5 +1,5 @@
 # Install Libraries -------------------------------------------------------
-tictoc::tic()
+# tictoc::tic() # For Time references to be commented out priopr to submission
 
 if (!require("pacman"))
   install.packages("pacman") # Package Management
@@ -25,8 +25,15 @@ pacman::p_load(
   furrr, # Parallel Mapping
   factoextra, # Clustering Visuals
   rcompanion, # Categorical Correlations
+  ldsr, # Inverse Transformations
   update = TRUE # Attempt package update if previously installed
 )
+
+#Install Patched kableExtra 
+devtools::install_github("kupietz/kableExtra")
+# Force install tinytex
+tinytex::install_tinytex(force = TRUE)
+tinytex::reinstall_tinytex(repository = "illinois")
 
 # Read Data ---------------------------------------------------------------
 
@@ -165,26 +172,35 @@ clear_memory <- function(keep = NULL) {
 
 # Pre-split Data Cleaning -------------------------------------------------
 
+glimpse(edx)
+
 edx_clean <- edx %>%
   as_tibble() %>% # Readability in Console
   clean_names() %>%  # Best Names
   mutate(across(ends_with('_id'), as.factor)) %>%  # IDs as factors
   mutate(across(timestamp, as_datetime)) # Time stamp as Date-Time
 
+max(str_count(edx_clean$genres, '\\|'))
+
+# Max number of genres is 7
+
 edx_clean %>%
   distinct(movie_id, genres) %>%
-  count(movie_id, genres, sort = TRUE)
-
-max(str_count(edx_clean$genres, '\\|'))
-# Max number of genres is 7
+  count(movie_id, genres, sort = TRUE) %>% 
+  pull(n) %>% 
+  max()
 
 # Genres are confirmed unique per film ID, pre split cleaning OK
 
 edx_clean %>%
   distinct(movie_id, title) %>%
-  count(movie_id, title, sort = TRUE)
+  count(movie_id, title, sort = TRUE) %>% 
+  pull(n) %>% 
+  max()
 
 # Titles are confirmed unique per film ID, pre split cleaning OK
+# Unlikely to peruse as it requires extensive text analysis
+
 edx_clean <- edx_clean %>%
   rename(c('genre' = 'genres')) %>%
   separate_wider_regex(
@@ -841,11 +857,13 @@ tibble(predictor = names(train_num),
          predictor = str_extract(predictor,'^[:alpha:]+\\_[:alpha:]+')) %>% 
   group_by(predictor) %>% 
   filter(remove == FALSE)
+
+cor_remove
   
 # swap film_age for release_year, release year is static across time
 # prefer non static features as f(t) is currently considered
 
-# cor_remove[which(cor_remove %in% 'film_age')] <- 'release_year'
+cor_remove[which(cor_remove %in% 'film_age')] <- 'release_year'
 
 train <- train %>% 
   select(-all_of(cor_remove))
@@ -965,8 +983,8 @@ user_boruta <- Boruta(rating~.,
 
 plot(user_boruta)
 
-# Genre and release year are the most important features for users 
-# while days_n is a distant thrid
+# Genre and film age are the most important features for users 
+# while days_n is a distant third
 # User ID is also considered not relevant in this study
 # one of these features may be leaking film effects too strongly
 # genre has a near 1:1 relation to film 
@@ -976,7 +994,7 @@ plot(user_boruta)
 set.seed(1949, sample.kind = 'Rounding')
 user_boruta <- Boruta(rating~.,
                       data = select(train,
-                                    -all_of(c('movie_id','release_year'))),
+                                    -all_of(c('movie_id','film_age'))),
                       getImp = getImpXgboost,
                       maxRuns = 50,
                       doTrace = 3)
@@ -999,7 +1017,7 @@ user_predictors <- c('user_id',user_predictors)
 set.seed(2148, sample.kind = 'Rounding')
 film_boruta <- Boruta(rating~.,
                       data = select(train,
-                                    -all_of(c('user_id','genre','release_year'))),
+                                    -all_of(c('user_id','genre','film_age'))),
                       getImp = getImpXgboost,
                       maxRuns = 50,
                       doTrace = 3)
@@ -1743,38 +1761,38 @@ test_0 %>%
   rmse_calc() %>%
   rmse_plot(label_accuracy = 0.0001)
 
-# Training Film~Days with a lambda of ~40 billion improved the model to an RMSE of 0.8081
+# Training Film~Days does not result in an improved model and will be dropped
 
-lambdas_best <- lambdas_best %>% 
-  add_row(feature = 'Film Days', lambda = lambda_min)
+# lambdas_best <- lambdas_best %>% 
+#   add_row(feature = 'Film Days', lambda = lambda_min)
+# 
+# # While minimal effects time does play a part in a predicting rating
+# # All features trained, Model 2 not required
+# 
 
-# While minimal effects time does play a part in a predicting rating
-# All features trained, Model 2 not required
-
-# Update train_betas
+# Update train_betas to user_genre as final
 train_betas <- function(data){
-  
-  data <-   data %>% 
+
+  data <-   data %>%
     mutate(b0 = b0,
-           y_hat_intercept = b0) %>% 
-    left_join(film_betas) %>% 
-    left_join(user_betas) %>% 
-    left_join(user_days_betas) %>% 
-    left_join(user_genre_betas) %>% 
-    left_join(film_days_betas) %>% 
-    mutate(across(starts_with('b_'),\(x) replace_na(x,0))) %>% 
+           y_hat_intercept = b0) %>%
+    left_join(film_betas) %>%
+    left_join(user_betas) %>%
+    left_join(user_days_betas) %>%
+    left_join(user_genre_betas) %>%
+    left_join(film_days_betas) %>%
+    mutate(across(starts_with('b_'),\(x) replace_na(x,0))) %>%
     mutate(y_hat_film = b0 + b_film,
            y_hat_user = b0 + b_film + b_user,
            y_hat_user_days = b0 + b_film + b_user + b_user_days * days_n,
            y_hat_user_genre = b0 + b_film + b_user + b_user_days * days_n + b_user_genre,
-           y_hat_film_days = b0 + b_film + b_user + b_user_days * days_n + b_user_genre + b_film_days * days_n,
-           y_hat_final = b0 + b_film + b_user + b_user_days * days_n + b_user_genre + b_film_days * days_n,
+           y_hat_final = b0 + b_film + b_user + b_user_days * days_n + b_user_genre,
            train_y_hat = rating - b0 - b_film - b_user - b_user_days * days_n - b_user_genre,
-           ) %>% 
+           ) %>%
     relocate(train_y_hat, .after = last_col())
-  
+
   return(data)
-  
+
 }
 
 # Final Test --------------------------------------------------------------
@@ -1798,4 +1816,48 @@ final_holdout_test_0 %>%
   select(all_of(c('rating','y_hat_final'))) %>% 
   rmse_calc()
 
-# Final RMSE 0.807
+# Final RMSE 0.810
+
+# Inverse Box-Cox (Interpretability of Prediction) ------------------------
+
+reverse_prep <- function(x,
+                         data_prep_model = preprocess_rating_model){
+  
+  # Extract Parameters from Data Prep Model
+  mean_prep <- data_prep_model$mean
+  sd_prep <- data_prep_model$std
+  lambda <- data_prep_model$bc$rating$lambda
+  
+  # Apply Reverse Transformation
+  y <- sd_prep*x + mean_prep # Reverse scaling & centering
+  
+    if(lambda == 0){
+    y <- exp(y)
+    }
+  else{
+    y <- (y*lambda + 1)^(1/lambda)
+  }
+  
+  # Box-Cox can overshoot original range limits
+  # Limit NAs to minimum rating of 0.5
+  # Limit y>5 to 5
+  y <- ifelse(is.na(y) | is.nan(y), 0.5, y)
+  y <- ifelse(y > 5, 5, y)
+ 
+  return(y)
+  
+}
+
+reverse_prep <- Vectorize(reverse_prep)
+
+final_holdout_test_0 %>% 
+  train_betas() %>% 
+  select(all_of(c('rating','y_hat_final'))) %>% 
+  mutate(across(c('rating','y_hat_final'),\(x) reverse_prep(x)))
+
+# Prediction is now interpretable
+
+# Timer -------------------------------------------------------------------
+
+# end <- tictoc::tic()
+# end #Timer commenterd out prior to delivery

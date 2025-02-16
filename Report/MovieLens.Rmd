@@ -1,0 +1,2825 @@
+---
+title: "MovieLens Film Recommendation System"
+subtitle: "Forward Stepwise Ridge Regression Trained Film Recomendation System"
+author: "Israel Girón-Palacios"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    df_print: kable
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{cancel}
+  - \usepackage{amsmath}
+  - \usepackage{float}
+abstract: "This paper covers the process by which a forward stepwise stepwise ridge regression
+  machine learning model was developed to perform film recommendations based on rating
+  prediction trained utilizing MovieLens' 10 Million observations dataset utilizing the R programming language as a Capstone Project for the HarvardX Data Science program offered via edX."
+---
+
+# Introduction
+
+One of the most often encountered types of machine learning classes that are encountered in daily life are recommender systems. Recommender Systems are any type of algorithms which are used to predict the preferences of an individual or group for an offered product or service. At the start of the information age one of the earliest applications of this class of machine learning systems was for film recommendations and its earliest incarnation came in the form of Rotten Tomatoes. Developed in 1998 by Senh Duong, Patrick Y. Lee & Stephen Wang[^1], Rotten Tomatoes is believed to be the first online site where film reviews by both users and critics are aggregated. The aggregate score would earn a film a badge whereby users could ensure that a film they are interested in is indeed worth the price of admission.
+
+[^1]: <https://editorial.rottentomatoes.com/article/rotten-tomatoes-asian-american/>
+
+As time went on and the industry grew the environment for recommender systems became increasingly competitive. Eventually in October 2, 2006, Netflix, a video streaming service, launched the now famous "Netflix Prize" completion[^2]. This open competition would pair up competitors against Netflix's own algorithm Cinematch. Ultimately the competition was won by a team up of participants named "BellKor's Pragmatic Chaos"[^3] almost 3 years after the start of the competition.
+
+[^2]: [ps://web.archive.org/web/20200510213032/https://www.netflixprize.com/assets/rules.pdf](https://web.archive.org/web/20200510213032/https://www.netflixprize.com/assets/rules.pdf){.uri}
+
+[^3]: <https://web.archive.org/web/20090925162430/http://netflix.mediaroom.com/index.php?s=43&item=327>
+
+The aim of this paper is to develop a recommender system trained using the publicly available 10M MovieLens Dataset[^4] using R.[^5]
+
+[^4]: <https://grouplens.org/datasets/movielens/10m/>
+
+[^5]: <https://www.r-project.org/>
+
+## MovieLens
+
+MovieLens is a non-commercial site film recommendation site operated and maintained by GroupLens Research at the University of Minnesota which maintains and provides several datasets related to film recommender systems to the public.
+
+## Basic Methodology & Loss Function
+
+A model will be trained using a data set containing 10 million observations which aims to predict a numeric rating. At the start a partition of 10% which contains all users and films will be set aside as a final holdout set which will be used to provide the effectiveness of the model by using Root Mean Squared Error (RMSE) as a loss function when comparing the model prediction to the holdout observation. RMSE will be calculated based on the formula:
+
+$$
+RMSE = \sqrt{\dfrac{1}{n}\sum_{i=1}^n(\hat{y}_i - y_i)^2}
+$$
+
+Where $\hat{y_i}$ is the predicted value $y_i$ is the observed value in the holdout set and $n$ is the total number of observations in the holdout set.
+
+To further validate model effectiveness the training partition will be further divided into a n 80/20 Train and Validation Partition. The latter being used for model comparison and the former for model training. The best performing model will then be used on the final holdout set. The validation set is also referred to as the test set. This paper will use these terms interchangeably when referring to this type of partition. The complete partition scope will therefore be 72/18/10.
+
+### Source Documentation
+
+The data source documentation[^6], provided via README text file, details the following variables for the dataset:
+
+[^6]: <https://files.grouplens.org/datasets/movielens/ml-10m-README.html>
+
+1.  Rating in a 5 star scale with half star increments.
+
+2.  Randomized and anonymized User ID
+
+3.  Film MovieLens identification number, Movie ID
+
+4.  Movie Title
+
+    1.  Manually entered as presented on IMDB.
+
+    2.  Not vetted for errors.
+
+5.  Review timestamp in Coordinated Universal Time[^7] (UTC).
+
+6.  Movie Genres as a pipe "\|" separated sting
+
+    1.  Action
+
+    2.  Adventure
+
+    3.  Animation
+
+    4.  Children's
+
+    5.  Comedy
+
+    6.  Crime
+
+    7.  Documentary
+
+    8.  Drama
+
+    9.  Fantasy
+
+    10. Film-Noir
+
+    11. Horror
+
+    12. Musical
+
+    13. Mystery
+
+    14. Romance
+
+    15. Sci-Fi
+
+    16. Thriller
+
+    17. War
+
+    18. Western
+
+7.  User generated Tags
+
+[^7]: <https://www.space.com/what-is-utc.html>
+
+For the purposed of training, tags will not be considered as these are user defined and therefore will lack any standardized definition. Data will be explored after the final holdout set 10% data partition but before the validation partition.
+
+```{r Install_Libraries, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+if (!require("pacman"))
+  install.packages("pacman") # Package Management
+pacman::p_load(
+  tidyverse,  # Standard Package
+  magrittr, # Pipe operator
+  caret, # Machine Learning Package
+  klaR,  # Factor Clustering
+  lubridate,  # Date-time manipulation
+  janitor,  # Data Cleaning
+  scales, # GGplot manipulation
+  ggrepel,  # GGplot manipulation
+  ggcorrplot,  # GGplot correlation visuals
+  ggridges , # GGplot manipulation
+  ggh4x , # GGplot manipulation
+  latex2exp, # GGplot with Latex
+  Boruta,  # Feature Selection wrapper
+  patchwork,  # GGplot manipulation
+  varrank, # Feature Selection wrapper
+  reshape, # Data manipulation
+  recommenderlab, # Matrix Factorization
+  cluster, # Kmeans Clustering
+  parallel, # Parallel Processing
+  doParallel, # Parallel Processing
+  furrr, # Parallel Mapping
+  factoextra, # Clustering Visuals
+  rcompanion, # Categorical Correlations
+  knitr, # Rmarkdown aid
+  booktabs, #Rmarkdown aid
+  tinytex, # Latex aid
+  MikTeX, # Latex aid
+  cancel, # Latex aid
+  amsmath, # Latex aid
+  kableExtra, # Rmarkdown tables
+  float, # Rmarkdown tables
+  devtools, # For patched libraries
+  update = TRUE # Attempt package update if previously installed
+)
+
+#Install Patched kableExtra 
+devtools::install_github("kupietz/kableExtra")
+# Force install tinytex
+tinytex::install_tinytex(force = TRUE)
+tinytex::reinstall_tinytex(repository = "illinois")
+```
+
+```{r Scrape_Data, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+# The following code is provided by EDX
+
+##########################################################
+# Create edx and final_holdout_test sets
+##########################################################
+
+# Note: this process could take a couple of minutes
+
+if (!require(tidyverse))
+  install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if (!require(caret))
+  install.packages("caret", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+options(timeout = 120)
+
+dl <- "ml-10M100K.zip"
+if (!file.exists(dl))
+  download.file("https://files.grouplens.org/datasets/movielens/ml-10m.zip",
+                dl)
+
+ratings_file <- "ml-10M100K/ratings.dat"
+if (!file.exists(ratings_file))
+  unzip(dl, ratings_file)
+
+movies_file <- "ml-10M100K/movies.dat"
+if (!file.exists(movies_file))
+  unzip(dl, movies_file)
+
+ratings <- as.data.frame(str_split(read_lines(ratings_file), fixed("::"), simplify = TRUE),
+                         stringsAsFactors = FALSE)
+colnames(ratings) <- c("userId", "movieId", "rating", "timestamp")
+ratings <- ratings %>%
+  mutate(
+    userId = as.integer(userId),
+    movieId = as.integer(movieId),
+    rating = as.numeric(rating),
+    timestamp = as.integer(timestamp)
+  )
+
+movies <- as.data.frame(str_split(read_lines(movies_file), fixed("::"), simplify = TRUE),
+                        stringsAsFactors = FALSE)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- movies %>%
+  mutate(movieId = as.integer(movieId))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Final hold-out test set will be 10% of MovieLens data
+set.seed(1, sample.kind = "Rounding") # if using R 3.6 or later
+# set.seed(1) # if using R 3.5 or earlier
+test_index <- createDataPartition(
+  y = movielens$rating,
+  times = 1,
+  p = 0.1,
+  list = FALSE
+)
+edx <- movielens[-test_index, ]
+temp <- movielens[test_index, ]
+
+# Make sure userId and movieId in final hold-out test set are also in edx set
+final_holdout_test <- temp %>%
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from final hold-out test set back into edx set
+removed <- anti_join(temp, final_holdout_test)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+
+```{r Restart_Libraries, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+
+# library(klaR) # Factor Clustering # Comment Out PDF Render Error
+library(lubridate) # Date-time manipulation
+library(janitor) # Data Cleaning
+library(ggrepel) # GGplot manipulation
+library(ggcorrplot) # GGplot correlation visuals
+library(ggridges) # GGplot manipulation
+library(ggh4x)  # GGplot manipulation
+library(latex2exp) # GGplot with Latex
+library(Boruta) # Feature Selection wrapper
+library(patchwork) # GGplot manipulation
+library(varrank) # Feature Selection wrapper
+library(reshape) # Data manipulation
+library(recommenderlab) # Matrix Factorization
+library(cluster) # Kmeans Clustering
+library(factoextra) # Clustering Visuals
+library(scales) # GGplot Manipulation
+library(broom) # Data Tidying
+library(caret) # Machine Learning Package
+library(parallel) # Parallel Processing
+library(doParallel) # Parallel Processing
+library(furrr) # Parallel Mapping
+library(rcompanion) # Categorical Correlations 
+library(tidyverse) # Standard Package
+library(knitr) # Rmarkdown Aid
+library(kableExtra) # Rmarkdown Aid
+```
+
+# Preliminary Data Exploration
+
+Exploring the scrapped data as is we can observe the following features:
+
+```{r Presplit_Data_Exploration, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+# Rmarkdown will require some functions to use infix syntax to run
+# Also some outputs will require formatting to optimize display for a 
+# report, e.g. tables
+
+edx_summary <- tibble::tibble(variable = names(edx),
+       class = sapply(edx,class),
+       distinct_observations = scales::label_comma()(sapply(edx, \(x) length(unique(x)))),
+       description = c(
+                       'User ID',
+                       'Film ID',
+                       '5 Star Rating',
+                       'UTC Timestamp',
+                       'Film Title',
+                       'Film Genre'
+                       )
+       )
+
+edx_summary_names <- names(edx_summary) %>% 
+  str_replace('_',' ') %>% 
+  str_to_title()
+
+summary_table <- kbl(edx_summary, col.names = edx_summary_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+summary_table
+```
+
+We can observe a large amount of users and films in the dataset. This will impact training as most publicly available computer systems will be ill equipped to handle datasets with these amount of features using standard training methods and inbuilt functions. This issue will be explored more in-depth in the subsequent Methodology Section. For the time being both ID features will be converted to factors.
+
+```{r Explore_Genre, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+# Basic Cleaning 
+# NO DATA LEAKAGE
+
+edx_clean <- edx %>%
+  as_tibble() %>% # Readability in Console
+  clean_names() %>%  # Best Names
+  mutate(across(ends_with('_id'), as.factor)) %>%  # IDs as factors
+  mutate(across(timestamp, as_datetime)) # Time stamp as Date-Time
+
+# Max Genre Count in Films
+genre_max <- max(str_count(edx_clean$genres, '\\|'))+1
+
+# 8 is the max genres a film can have
+
+# Genre Distinct Count per Film
+genre_film_distinct <- edx_clean %>%
+  distinct(movie_id, genres) %>%
+  count(movie_id, genres, sort = TRUE) %>% 
+  pull(n) %>% 
+  max()
+
+# 1, all films have unique genre strings
+```
+
+As explained in the source documentation genres is stored as a string. in order to be applicable to training methods the string has to be separated into its constituent parts. The maximum amount of genres a film can have is ${`r genre_max`}$ so a total of ${`r genre_max`}$ new features will be developed. Per film the distinct count of genres stands at ${`r genre_film_distinct`}$ and therefore the resulting genre features will not be subject to data leakage if performed before splitting the data into the train/test partitions. These new genre features will be refereed to as genre levels.
+
+```{r Explore_Title, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+title_film_distinct <- edx_clean %>%
+  distinct(movie_id, title) %>%
+  count(movie_id, title, sort = TRUE) %>% 
+  pull(n) %>% 
+  max()
+
+# 1
+```
+
+Title text will not be considered as a training feature at this time due to the increased complexity of text analysis requirements and the non-vetted nature of the data per the source documentation. However the film release year contained within will be considered as a feature. Distinct count of film titles stands as ${`r title_film_distinct`}$ and therefore will be unique per film and ensures that release year is a viable feature for extraction.
+
+The timestamp feature is currently an integer. In order for usability with most analysis methods this will be converted into a date-time class feature. The auxiliary features listed below will also be extracted as this time, timestamp is a per observation feature and will not result in data leakage.
+
+1.  Review Date.
+
+2.  Review Year.
+
+3.  Review Month.
+
+4.  Review Day.
+
+5.  Review Weekday.
+
+6.  Review ISO week number.
+
+7.  Review Hour.
+
+8.  Review Minute.
+
+9.  Review Second.
+
+10. Review Decade.
+
+11. Is AM, establishes if the review took place in the AM or PM.
+
+12. Film Age, will take the difference in years between the previously extracted year of release and the newly extracted review year.
+
+```{r Feature_Extraction, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+edx_clean <- edx_clean %>%
+  rename(c('genre' = 'genres')) %>%
+  separate_wider_regex(
+    # Separate Title Text from Year of Release
+    cols = title,
+    patterns = c(title = '.*?', release_year = '\\([:digit:]+\\)')
+  ) %>%
+  mutate(title = str_squish(title),
+         # Clean Title Text
+         release_year = as.integer(str_extract(release_year, '[:digit:]+'))) %>%  # Extract Year as Integer)
+  separate_wider_delim(genre,
+                       # Separate Genres
+                       delim = '|',
+                       names_sep = '_',
+                       too_few = 'align_start') %>%
+  mutate(across(starts_with('genre_'), \(x) replace_na(x, 'None'))) %>%  # Replace NAs and convert to Factors
+  mutate(across(starts_with('genre_'), \(x) as_factor(x))) %>% 
+  # Extract Date-Time features ahead of split (not a time series given provided split)
+  mutate(
+    review_date = as_date(timestamp),
+    # Review Date
+    review_year = year(review_date),
+    # Review Year
+    review_month = month(review_date, label = TRUE, abbr = FALSE),
+    # Review Month
+    review_day = day(review_date),
+    # Review Day
+    review_weekday = wday(review_date, label = TRUE, abbr = FALSE),
+    # Review Weekday
+    review_week = isoweek(review_date),
+    # Review ISO week number
+    review_hour = hour(timestamp),
+    # Review Hour
+    review_minute = minute(timestamp),
+    # Review Minute
+    review_second = as.integer(second(timestamp)),
+    # Review Second
+    review_decade = review_year - review_year %% 10,
+    # Review Decade
+    release_decade = release_year - release_year %% 10,
+    # Release Decade
+    is_am = as.factor(am(timestamp)), # Review take place in the AM
+    film_age = review_year - release_year
+  ) %>%
+  mutate(across(ends_with('_decade'), as.integer)) # Decades as integers
+```
+
+This will result in a dataset containing the following features:
+
+```{r Dataset_Features, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+# glimpse(edx_clean)
+
+edx_clean_summary <- tibble::tibble(variable = names(edx_clean),
+       class = sapply(edx_clean,class),
+       distinct_observations = scales::label_comma()(sapply(edx_clean, \(x) length(unique(x)))),
+       description = c(
+                       'User ID',
+                       'Film ID',
+                       '5 Star Rating',
+                       'UTC Timestamp',
+                       'Film Title',
+                       'Release Year',
+                       'Genre Level 1',
+                       'Genre Level 2',
+                       'Genre Level 3',
+                       'Genre Level 4',
+                       'Genre Level 5',
+                       'Genre Level 6',
+                       'Genre Level 7',
+                       'Genre Level 8',
+                       'Review Date',
+                       'Review Year',
+                       'Review Month',
+                       'Review Day',
+                       'Review Weekday',
+                       'Review Week',
+                       'Review Hour',
+                       'Review Minute',
+                       'Review Second',
+                       'Review Decade',
+                       'Release Dacade',
+                       'Reviewed in the AM',
+                       'Age of the film in years when reviewed'
+                       )
+       )
+
+edx_clean_summary_names <- names(edx_clean_summary) %>% 
+  str_replace('_',' ') %>% 
+  str_to_title()
+
+summary_clean_table <- kbl(edx_clean_summary, col.names = edx_clean_summary_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+summary_clean_table
+```
+
+# Methodology
+
+```{r Data_Partition, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+
+# Define 80/20 Split Index
+set.seed(1539, sample.kind = 'Rounding')
+index <- createDataPartition(
+  y = edx_clean$rating,
+  times = 1,
+  p = 0.8,
+  list = FALSE
+)
+
+# Create Train and Temp Test Split
+train <- edx_clean[index, ]
+temp <- edx_clean[-index, ]
+
+# Balance IDs across Train and Temp to create Test split
+test <- temp %>%
+  semi_join(train, by = "movie_id") %>%
+  semi_join(train, by = "user_id")
+
+# Replace observations back into train set
+removed <- anti_join(temp, test)
+train <- rbind(train, removed)
+
+# Arrange Train Set in timestamp order
+train <- train %>%
+  arrange(timestamp)
+```
+
+As stated in the Preliminary Data Exploration section, most training methods will be ill equipped to handle this training dataset. The most common methods for determining a linear model is done apply the Ordinary Least Squares or OLS. This method fits a line which minimizes the sum of squares between an a response feature and an explanatory variable.
+
+A linear model in matrix notation has the following form:
+
+$$
+Y = X\beta+\epsilon
+$$
+
+Where $Y$ is the value of the response variable, $x$ is the value of the explanatory variable, $\beta$ is the coefficient which estimates how the explanatory variable explains the response variable and finally an error of $\epsilon$.
+
+Analytically OLS can de represented as the following set of operations
+
+```{=latex}
+\begin{equation*}
+\arg\!\min\!\left((Y-X\beta)^2\right)
+\end{equation*}
+```
+
+$$
+\because(Y-X\beta)^2=(Y-X\beta)^{\mathbf{I}}(Y-X\beta)
+$$
+
+$$
+\because (a-b)(a-b)=a^2-2*a*b+b^2
+$$
+
+$$
+\therefore (Y-X\beta)^{\mathbf{I}}(Y-X\beta)=Y^{\intercal}Y-\beta^{\intercal} X^{\intercal}Y-YX\beta+\beta^{\intercal} X^{\intercal}X\beta
+$$
+
+$$
+\therefore (Y-X\beta)^{\mathbf{I}}(Y-X\beta)=Y^{\intercal}Y-2\beta^{\intercal}X^{\intercal}Y+\beta^{\intercal}X^{\intercal}X\beta
+$$
+
+```{=latex}
+\begin{equation*}
+\arg\!\min\!\left({(Y-X\beta)^2}\right) \rightarrow \dfrac{d}{d\beta}Y^{\intercal}Y-2\beta^{\intercal} X^{\intercal}Y+\beta^{\intercal} X^{\intercal}X\beta=0
+\end{equation*}
+```
+
+$$
+\dfrac{d}{d\beta}Y^{\intercal}Y-2\beta^{\intercal}X^{\intercal}Y+\beta^{\intercal} X^{\intercal}X\beta=0
+$$
+
+$$
+\cancelto{0}{Y^{\intercal}Y-2}\cancelto{1}{\beta^{\intercal}}X^{\intercal}Y+\cancelto{2}{\beta^{\intercal}}X^{\intercal}X\beta=0
+$$
+
+$$
+-2X^{\intercal}Y+2X^{\intercal}X\beta=0
+$$
+
+$$
+-\cancel{2}X^{\intercal}Y+\cancel{2}X^{\intercal}X\beta=0
+$$
+
+$$
+-X^{\intercal}Y+X^{\intercal}X\beta=0
+$$
+
+$$
+X^{\intercal}X\beta=X^{\intercal}Y
+$$
+
+$$
+\beta=({X^{\intercal}X})^{-1}X^{\intercal}Y
+$$
+
+```{r Method_Limits, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+
+ols_max_cols <- train %>% 
+  summarise(across(where(is.factor),n_distinct)) %>% 
+  as.matrix() %>% 
+  rowSums()
+
+ols_rows <- nrow(train)
+
+ols_sparse <- (ols_max_cols)/(ols_max_cols*ols_rows)
+```
+
+The calculation of the vector $\beta$ involves multiple matrix operations. Compounding to this, factors in these cases are also converted into matrix columns via one-hot encoding. Therefore we are expecting an ${`r scales::label_comma()(ols_max_cols)`}\times{`r scales::label_comma()(ols_rows)`}$ matrix with a sparsity of `r scales::label_percent(accuracy = 0.0000001)(ols_sparse)`. This will make calculation of $\beta$ coefficients complex and memory intensive. Most built-in functions use methods such as QR decomposition for solving $\beta$ for a given model.
+
+$$
+\because X=QR
+$$
+
+where $Q$ is an $n\times m$ matrix and $R$ is an $m \times m$ upper triangular matrix.
+
+$$
+X^{\intercal}X\beta=X^{\intercal}Y \rightarrow (QR)^{\intercal}(QR)\beta=(QR)^{\intercal}Y
+$$
+
+$$
+(QR)^{\intercal}(QR)\beta=(QR)^{\intercal}Y
+$$
+
+$$
+R^{\intercal}(Q^{\intercal}Q)R\beta=R^{\intercal}Q^{\intercal}Y
+$$
+
+$$
+R^{\intercal}R\beta=R^{\intercal}Q^{\intercal}Y
+$$
+
+$$
+(R^{\intercal})^{-1}R^{\intercal}R\beta=(R^{\intercal})^{-1}R^{\intercal}Q^{\intercal}Y
+$$
+
+$$
+R\beta=Q^{\intercal}Y
+$$
+
+A solution can then be achieved using back substitution. However, even with QR Decomposition being considered the more stable method and using only one $n \times m$ matrix an analytical solution to OLS for a dataset this complex on consumer hardware is recommended.
+
+## Analytical Solution to OLS
+
+The analytical solution to OLS follows from the previously defined matrix form calculation for the $\beta$ vector. For added simplicity the solution assumes that a single feature is being trained at a time. Once the $\beta$ for a feature have been trained a new response variable $Y^{\prime}$ will be used when training the new $\beta$ coefficients for the new explanatory variable and this is repeated step by step in succession. In a sense this is a Forward Stepwise Regression.
+
+Starting from $X^{\intercal}X$ for a single variable the matrix operation can be visualized a:
+
+```{=latex}
+$$
+\begin{bmatrix}
+x_1\\x_2\\.\\.\\.\\x_n\\
+\end{bmatrix}
+\begin{bmatrix}
+x_1 & x_2 &...& x_n
+\end{bmatrix}
+=
+\begin{bmatrix}
+x_1x_1&+&x_2x_2&+&...&+&x_nx_n
+\end{bmatrix}
+$$
+```
+
+Which can be summarized as:
+
+```{=latex}
+$$
+\begin{bmatrix}
+x_1x_1&+&x_2x_2&+&...&+&x_nx_n
+\end{bmatrix}
+=
+\sum_{i=1}^{n}x_i^2
+$$
+```
+
+Applying this to the original calculation:
+
+```{=latex}
+\[
+\beta=({X^{\intercal}X})^{-1}X^{\intercal}Y \rightarrow \left(\sum\limits_{i=1}^{n}x_{i}^2\right)^{-1}X^{\intercal}Y 
+\]
+```
+
+```{=latex}
+\[
+\beta= \left(\sum\limits_{i=1}^{n}x_{i}^2\right)^{-1}X^{\intercal}Y
+\]
+```
+
+```{=latex}
+\[
+\dfrac{1}{\sum\limits_{i=1}^{n}x_i^2}X^{\intercal}Y
+\]
+```
+
+At this stage we can simplify $X^{\intercal}Y$ as:
+
+```{=latex}
+$$
+\begin{bmatrix}
+x_1 & x_2 &...& x_n
+\end{bmatrix}
+\begin{bmatrix}
+y_1\\y_2\\.\\.\\.\\y_n\\
+\end{bmatrix}=
+\begin{bmatrix}
+x_1y_1&+&x_2y_2&+&...&+&x_ny_n
+\end{bmatrix}
+$$
+```
+
+```{=latex}
+$$
+\begin{bmatrix}
+x_1y_1&+&x_2y_2&+&...&+&x_ny_n
+= \sum_{i=1}^{n}{x_iy_i}
+\end{bmatrix}
+$$
+```
+
+Which updates the $\beta$ calculation function to:
+
+```{=latex}
+\[
+\beta=\dfrac{1}{\sum\limits_{i=1}^{n}{x_i^2}}\sum\limits_{i=1}^{n}{x_iy_i}
+\]
+```
+
+```{=latex}
+\[
+\beta=\dfrac{\sum\limits_{i=1}^{n}{x_iy_i}}{\sum\limits_{i=1}^{n}{x_i^2}}
+\]
+```
+
+The formula for calculating the $\beta$ vector is simplified to the division of two product summations.
+
+### Analytical Solution Application
+
+The function that was defined for calculating the $\beta$ vector can be easily applied to numeric explanatory variables directly as $X$ and $Y$ being a numeric would just require input for the variable values.
+
+When $X$ is categorical the feature must first be prepared via one-hot encoding. This results in multiple columns where a the presence of a feature will result in a value of $1$ and its absence a value of $0$. Extending the one feature trained at a time rule the $X$ vector will be a vector where every value is $1$.
+
+```{=latex}
+\[
+\beta_{categorical}=\dfrac{\sum\limits_{i=1}^{n}{1_iy_i}}{\sum\limits_{i=1}^{n}{1_i^2}}
+\]
+```
+
+```{=latex}
+\[
+\beta_{categorical}=\dfrac{\sum\limits_{i=1}^{n}{y_i}}{n}
+\]
+```
+
+```{=latex}
+\[
+\beta_{categorical}=\dfrac{1}{n}\sum\limits{i=1}^{n}{y_i}
+\]
+```
+
+$$
+\beta_{categorical} = \bar{y}
+$$
+
+When the explanatory feature is categorical the $\beta$ coefficient is the mean of the response variable. This extends to the calculation of a intercept value, since an intercept can be interpreted as an $X$ vector where all the values are $1$.
+
+The $\beta$ functions for OLS are:
+
+$$
+\beta_{categorical} = \bar{y}
+$$
+
+```{=latex}
+\[
+\beta_{numeric}=\dfrac{\sum\limits_{i=1}^{n}{x_iy_i}}{\sum\limits_{i=1}^{n}{x_i^2}}
+\]
+```
+
+### Limitations to OLS
+
+Analyzing the $\beta$ functions a limitation can be observed. Both functions return a quotient, however if any two given quotient are similar in value but are calculated with vastly different divisors then in terms of regression analysis the features being trained are highly correlated when they are in fact not. This is referred to as multicollinearity. For example, two films have sufficiently similar beta coefficients, however one film has more observations, reviews, than the other. Then the one with more observations will have a more stable $\beta$ coefficient than the one with less observations where. Any predictions based on unstable $\beta$s can be expected to be skewed and for our purposes will likely result in a higher RMSE.
+
+This can be mitigated by applying Ridge Regression instead of OLS.
+
+## Analytical Solution to Ridge Regression
+
+In order to account for multicollinearity instead of using the previous $\beta$ functions new functions based on the analytical solution to ridge regression. This method is chosen as it has an easily applicable closed form solution which is not to dissimilar to the analytical solution to OLS.
+
+What differentiates Ridge Regression from OLS is the addition of a penalty $\lambda$ to the beta coefficients which will shrink the coefficients towards zero.
+
+```{=latex}
+\[
+\arg\!\min\!\left((Y-X\beta)^2+\lambda\sum\limits_{j=1}^{n}{\beta}\right)
+\]
+```
+
+$$ 
+\because(Y-X\beta)^2=(Y-X\beta)^{\mathbf{I}}(Y-X\beta)
+$$
+
+$$
+\because (a-b)(a-b)=a^2-2*a*b+b^2
+$$
+
+$$
+\therefore (Y-X\beta)^{\mathbf{I}}(Y-X\beta)=Y^{\intercal}Y-\beta^{\intercal} X^{\intercal}Y-YX\beta+\beta^{\intercal} X^{\intercal}X\beta
+$$
+
+$$
+\therefore (Y-X\beta)^{\mathbf{I}}(Y-X\beta)=Y^{\intercal}Y-2\beta^{\intercal}X^{\intercal}Y+\beta^{\intercal}X^{\intercal}X\beta
+$$
+
+$$
+\arg\!\min{Y^{\intercal}Y-2\beta^{\intercal}X^{\intercal}Y+\beta^{\intercal}X^{\intercal}X\beta+\lambda\beta^{\intercal}\beta}
+$$
+
+```{=latex}
+\[
+\arg\!\min\!\left((Y-X\beta)^2+\lambda\sum\limits_{j=1}^{n}{\beta}\right)\rightarrow\frac{d}{d\beta}Y^{\intercal}Y-2\beta^{\intercal}X^{\intercal}Y+\beta^{\intercal}X^{\intercal}X\beta+\lambda\beta^{\intercal}\beta=0
+\]
+```
+
+$$
+\cancelto{0}{Y^{\intercal}Y-2}\cancelto{1}{\beta^{\intercal}}X^{\intercal}Y+\cancelto{2}{\beta^{\intercal}}X^{\intercal}X\beta+\lambda\cancelto{2}{\beta^{\intercal}}\beta=0
+$$
+
+$$
+-2X^{\intercal}Y+2X^{\intercal}X\beta+2\lambda\beta=0
+$$
+
+$$
+\cancel{2}(-X^{\intercal}Y+X^{\intercal}X\beta+\lambda\beta)=0
+$$
+
+$$
+-X^{\intercal}Y+X^{\intercal}X\beta+\lambda\beta=0
+$$
+
+$$
+X^{\intercal}Y=X^{\intercal}X\beta+\lambda\beta
+$$
+
+$$
+X^{\intercal}Y=(X^{\intercal}X+\lambda\mathbf{I})\beta
+$$
+
+$$
+\beta_{ridge}=(X^{\intercal}X+\lambda\mathbf{I})^{-1}X^{\intercal}Y
+$$
+
+The analytical solution to ridge regression adds a penalty term, $\lambda$, diagonally to all all explanatory variables in matrix form prior to inverting. This means that the only change to the previously defined function will be on the denominator.
+
+```{=latex}
+\[
+\because 
+X^{\intercal}X=
+\begin{bmatrix}
+x_1\\x_2\\.\\.\\.\\x_n\\
+\end{bmatrix}
+\begin{bmatrix}
+x_1 & x_2 &...& x_n
+\end{bmatrix}
+=
+\begin{bmatrix}
+x_1x_1&+&x_2x_2&+&...&+&x_nx_n
+\end{bmatrix}=
+\sum\limits_{i=1}^{n}{x_i^2}
+\]
+```
+
+```{=latex}
+\[
+\therefore X^{\intercal}X+\lambda\mathbf{I} = \sum\limits_{i=1}^{n}{x_i^2+\lambda}
+\]
+```
+
+```{=latex}
+\[
+\therefore\beta=\dfrac{\sum\limits_{i=1}^{n}{x_iy_i}}{\sum\limits_{i=1}^{n}{x_{i}^2+\lambda}}
+\]
+```
+
+As with the previous application, when the explanatory variable is categorical $X$ is a vector where all values are equal to $1$. Delving deeper into the function a special case of ridge regression appears when $\lambda=0$.
+
+```{=latex}
+\[
+\beta_{ridge}(\lambda=0)=\dfrac{\sum\limits_{i=1}^nx_iy_i}{\sum\limits_{i=1}^{n}x_i^2+0}=\dfrac{\sum\limits_{i=1}^nx_iy_i}{\sum\limits_{i=1}^{n}x_i^2}=\beta_{OLS}
+\]
+```
+
+As demonstrated above, when $\lambda=0$ the function $\beta_{ridge}=\beta_{OLS}$. Another special case can be observed as $\lambda\rightarrow\infty$.
+
+```{=latex}
+\[
+\because\beta(\lambda)=\dfrac{\sum\limits_{i=1}^{n}{x_iy_i}}{\sum\limits_{i=1}^{n}{x_i^2+\lambda}}
+\]
+```
+
+$$
+\therefore\lim_{\lambda\to\infty}\beta(\lambda)=0
+$$
+
+As $\lambda$ increases the values of $\beta$ will approach $0$. A limitation of Ridge regression compared to its counterpart Lasso Regression is that the former will approach but never reach $0$ while Lasso will set coefficients to $0$. However, Lasso Regression applies a penalty to the absolute value of the $\beta$ coefficients instead of their square. This change will result in a model that has no analytical solution and therefore is not a suitable method to apply to our dataset.
+
+As such our training methodology will apply the $\beta_{ridge}$ functions and define a range of $\lambda$ values which includes $0$ as tunable model hyperparameter, this set will be arranged in increasing order. The best choice of hyperparameter will be determined via repeated cross-validation on the training set following a $80/20$ partition. In order to keep the processing time to a minimum while ensuring sufficient repetitions the process will be limited to $5$ repetitions.
+
+As a stopping rule if tuning process fails to converge on a minimum then the feature will be removed from the model, this is due to the fact that as $\lambda$ increased the coefficients will approach $0$. However if $\lambda$ continues to increase with the $\beta$ coefficients rapidly approaching $0$ and a minimum $RMSE$ is not reached then the feature is not expected to improve the model. The stopping rule will be subject to the scale of the $X$ and $Y$ vectors. Categorical features will likely have smaller values of $\lambda$ than numerical features as a count of observations given by $n$ will tend to be smaller than the summation of the product of two numeric values.
+
+\pagebreak
+
+# Exploratory Data Analysis & Feature Engineering
+
+In this section exploratory data analysis will be undertaken on the training set. This will encompass feature engineering and rudimentary feature selection.
+
+```{r GGplot_Settings, message=FALSE, warning=FALSE, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+ggplot2::theme_set(ggplot2::theme_bw())
+```
+
+## Response Variable Distribution
+
+As the source documentation details rating, the response variable, are values in a scale from $0$ to $5$ in $\frac{1}{2}$ star increments.
+
+```{r Rating_Distribution, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+mean_rating <- mean(train$rating)
+mean_rating_label <- paste('$\\bar{\\mu_{rating}}=$',round(mean_rating, 2))
+rating_dist_breaks <- round(seq(0.5,5,0.5), 1)
+
+train %>%
+  ggplot(aes(rating)) +
+  geom_density(fill = '#F8766D') +
+  geom_vline(xintercept = mean_rating,
+             linetype = 'dashed') +
+  annotate('label',
+           x = mean_rating,
+           y = 0,
+           label = TeX(mean_rating_label)) +
+  scale_y_continuous('Count', labels = label_comma()) +
+  scale_x_continuous('Rating', breaks = rating_dist_breaks) + 
+  ggtitle('Rating Distribution')
+```
+
+Rating distribution demonstrates that $\frac{1}{2}$ star ratings are less common than full star ratings. However the overall mean rating is `r mean_rating_label` which coincides with the rating option $3.5$.
+
+```{r Rating_Distibution_Year, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+train %>% 
+  ggplot(aes(x = rating, y = as.factor(review_year))) +
+  stat_density_ridges(bins = n_distinct(train$rating),
+                      fill = '#F8766D',
+                      quantile_lines = TRUE,
+                      quantile_fun = mean
+                      ) +
+  geom_vline(xintercept = mean_rating,
+             linetype = 'dashed') +
+  annotate('label',
+           x = mean_rating,
+           y = 1,
+           label = TeX(mean_rating_label)) +
+  ylab('Review Year') +
+  scale_x_continuous('Rating', breaks = rating_dist_breaks)+
+  ggtitle('Rating Distribution by Year')
+```
+
+Note, the distribution of values may imply that ratings may be better classified as a categorical feature than a numeric feature. This may be a viable path to follow, however the loss function requires numeric inputs and it will alter the methodology significantly. Therefore this avenue will not be followed within this paper.
+
+Exploring rating distribution by $Year$we can observe that $\frac{1}{2}$ star options are not available prior to $2003$. It can also be observed that the man rating by $Year$will vary from the overall rating and will start to converge on the overall mean rating as the $\frac{1}{2}$ rating become available.
+
+```{r Rating_Distribution_Time, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+mean_daily_rating <- train %>% 
+  group_by(review_date) %>% 
+  summarise(mean_rating = mean(rating))
+
+mean_daily_rating %>% 
+  ggplot(aes(review_date, mean_rating)) +
+  geom_line(color = '#F8766D') +
+  geom_hline(yintercept = mean_rating,
+             linetype = 'dashed') +
+  geom_smooth(data = train,
+              color = '#00BFC4',
+              alpha = 0.25,
+              aes(review_date, rating)) +
+  annotate('label',
+           y = mean_rating,
+           x = min(mean_daily_rating$review_date) + 365/2,
+           label = TeX(mean_rating_label)) +
+  scale_x_date('Review Date',
+               date_breaks = '1 year',
+               labels = label_date(format = '%Y')) +
+  ylab('Mean Rating') +
+  ggtitle('Rating Distribution by Time')
+```
+
+This exploration reveals that the smoothed mean rating is stable through time but the spread of values of actual mean ratings is quite unstable prior to the the year $2000$. After which the there are instances where mean rating spikes, they seemingly follow a yearly trend. The following subsection will look into a potential choice of a time variable.
+
+\pagebreak
+
+### Rating Distribution by Users & Films
+
+This section will compare the mean rating distributions when users and films are grouped separately.
+
+```{r Rating_Distribution_ID, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+user_means <- train %>% 
+  group_by(user_id) %>% 
+  summarise(mean_rating = mean(rating)) %>% 
+  rename(c('id' = 'user_id'))
+
+user_mean_rating <- mean(user_means$mean_rating)
+user_sd_rating <- sd(user_means$mean_rating)
+user_mean_rating_label <- paste('$\\bar{\\mu_{User}}=$',round(user_mean_rating, 2))
+
+film_means <- train %>% 
+  group_by(movie_id) %>% 
+  summarise(mean_rating = mean(rating)) %>% 
+  rename(c('id' = 'movie_id'))
+
+film_mean_rating <- mean(film_means$mean_rating)
+film_sd_rating <- sd(film_means$mean_rating)
+film_mean_rating_label <- paste('$\\bar{\\mu_{Film}}=$',round(film_mean_rating, 2))
+
+all_mean <- bind_rows(list(users = user_means, films = film_means), .id = 'type') %>% 
+  mutate(type = as.factor(str_to_title(type)))
+```
+
+```{r Rating_Distribution_ID_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+all_mean %>% 
+  ggplot(aes(mean_rating, fill = type)) +
+  geom_density(alpha = 0.1) +
+  geom_vline(xintercept = user_mean_rating,
+             color = '#00BFC4',
+             linetype = 'dashed') +
+  geom_vline(xintercept = film_mean_rating,
+             color = '#F8766D',
+             linetype = 'dashed') +
+  geom_vline(xintercept = mean_rating,
+             linetype = 'dashed') +
+  # User Label
+  annotate('label',
+           x = user_mean_rating,
+           y = 0,
+           label = TeX(user_mean_rating_label)) +
+  # Film Label
+  annotate('label',
+           x = film_mean_rating,
+           y = 0.10,
+           label = TeX(film_mean_rating_label)) +
+  # Overall Label
+  annotate('label',
+           x = mean_rating,
+           y = 0.2,
+           label = TeX(mean_rating_label)) +
+  stat_function(fun = dnorm, args = list(mean = user_mean_rating, sd = user_sd_rating),
+                color = '#00BFC4',
+                linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = film_mean_rating, sd = film_sd_rating),
+                color = '#F8766D',
+                linewidth = 1) +
+  xlab('Rating') +
+  ylab(TeX('$Density_{scaled}$')) +
+  guides(fill = guide_legend('Type')) +
+  ggtitle('Rating Distribution by Users and Films')
+```
+
+On average users tend to have higher mean ratings than film mean ratings. This may imply that there are a larger number of lower rated films than there are users who rate film they do not enjoy.
+
+Of note is that both distributions are negatively skewed. Given that the method by which the $\beta$ coefficients are proportional to a mean value the calculation is susceptible to the data skew. To remedy this a Box-Cox transformation will be applied to the rating values for training purposes. For this exploration the transform will be applied to the mean ratings.
+
+```{r Rating_BC_Distribution_ID, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+box_trans <- preProcess(as.data.frame(all_mean),
+           method = c('center','scale','BoxCox'))
+
+all_mean_bc <- tibble(predict(box_trans,as.data.frame(all_mean)))
+all_mean_bc_mean_rating <- mean(tibble(predict(box_trans,as.data.frame(setNames(dplyr::select(train,'rating'),'mean_rating'))))$mean_rating)
+all_mean_bc_sd_rating <- sd(tibble(predict(box_trans,as.data.frame(setNames(dplyr::select(train,'rating'),'mean_rating'))))$mean_rating)
+
+all_mean_bc_stats <- all_mean_bc %>% 
+  group_by(type) %>% 
+  summarise(mean = mean(mean_rating),
+            sd = sd(mean_rating))
+
+user_mean_rating_label <- paste('$\\bar{\\mu_{User}}=$',round(all_mean_bc_stats[[2,2]], 2))
+film_mean_rating_label <- paste('$\\bar{\\mu_{Film}}=$',round(all_mean_bc_stats[[1,2]], 2))
+mean_rating_label_bc <- paste('$\\bar{\\mu_{rating}}=$',round(all_mean_bc_mean_rating, 2))
+```
+
+```{r Rating_BC_Distribution_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+all_mean_bc %>% 
+  ggplot(aes(mean_rating, fill = type)) +
+  geom_density(alpha = 0.1) +
+  geom_vline(xintercept = all_mean_bc_stats[[2,2]],
+             color = '#00BFC4',
+             linetype = 'dashed') +
+  geom_vline(xintercept = all_mean_bc_stats[[1,2]],
+             color = '#F8766D',
+             linetype = 'dashed') +
+  geom_vline(xintercept = all_mean_bc_mean_rating,
+             linetype = 'dashed') +
+  stat_function(fun = dnorm, args = list(mean = all_mean_bc_stats[[2,2]], sd = all_mean_bc_stats[[2,3]]),
+                color = '#00BFC4',
+                linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = all_mean_bc_stats[[1,2]], sd = all_mean_bc_stats[[1,3]]),
+                color = '#F8766D',
+                linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = all_mean_bc_stats[[1,2]], sd = all_mean_bc_stats[[1,3]]),
+                color = '#F8766D',
+                linewidth = 1) +
+  stat_function(fun = dnorm, args = list(mean = all_mean_bc_mean_rating, sd = all_mean_bc_sd_rating),
+                color = '#000000',
+                linewidth = 1) +
+  # User Label
+  annotate('label',
+           x = all_mean_bc_stats[[2,2]],
+           y = 0,
+           label = TeX(user_mean_rating_label)) +
+  # Film Label
+  annotate('label',
+           x = all_mean_bc_stats[[1,2]],
+           y = 0.1,
+           label = TeX(film_mean_rating_label)) +
+  # Overall Label
+  annotate('label',
+           x = all_mean_bc_mean_rating,
+           y = 0.2,
+           label = TeX(mean_rating_label_bc)) +
+  xlab(TeX('$Rating_{BoxCox}$')) +
+  ylab(TeX('$Density_{scaled}$')) +
+  guides(fill = guide_legend('Type')) +
+  ggtitle('Box-Cox Transformed Rating Distribution by Users and Films')
+```
+
+The Box-Cox transformed distribution approximate a normal distribution more closely. Comparing to the non-transformed values mean user rating now more closely matches the overall mean rating.
+
+By applying this transformation the methodology will have to account for the calculation of the overall intercept. The Box-Cox transform also applies centering and scaling, as such all values are centered around $0$. Following the matrix form calculation of the intercept will be $0$.
+
+This also implies that the best model may have the following form:
+
+```{=latex}
+\begin{equation*}
+\hat{Y}=\text{user effects}+\text{film effects}+\text{overall effects(intercept)}
+\end{equation*}
+```
+
+## Time Slices
+
+In the previous section there was a potential indicator that ratings are affected by season and time. Given the relative point in which spikes occur yearly season will be covered thy the features $Month$ and $Week$. Slicing a year by $Quarter$ is not expected to add significant predictive power, while there is a trend observed by quarter the fluctuations in means varies to a great degree. These features separate time into discrete subsets. As the smoothed out trend implied there may be a continuous time effect.
+
+### Continuous Time
+
+To define a stable continuous time scale an appropriate unit of time must be defined first. The feature of choice to this exploration will be $User ID$, Films have a history outside of the service and this may influence their reception across users while the opposite is less likely.
+
+```{r Continuous_Time_Slices_Summary, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+# Study time slices by user intervals and filter by pair-wise correlations
+times_user <- train %>% 
+  group_by(user_id) %>% 
+  summarise(start_date = min(review_date),
+            end_date = max(review_date),
+            n = n()
+            )
+
+working_cores <- detectCores() - 1
+
+plan(multisession, workers = working_cores)
+
+times_intervals <- future_map2(times_user$start_date, times_user$end_date,\(x,y) interval(x,y))
+times_days <- future_map_dbl(times_intervals,\(x) x/days(1))
+
+plan(sequential)
+
+times_user <- times_user %>% 
+  mutate(times_days = times_days + 1,
+         days = n/times_days,
+         weeks = n/times_days/52.142,
+         months = n/times_days/12
+         )
+
+times_user_summary <- times_user %>% 
+  summarise(across(c('days','weeks','months'),mean))
+```
+
+```{r Continuous_Time_Slices_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+time_user_names <- names(times_user_summary) %>% 
+  str_replace('_',' ') %>% 
+  str_to_title()
+
+times_user_summary_table <- kbl(times_user_summary, col.names = time_user_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+times_user_summary_table
+```
+
+On average, users tend to review less by $Week$ than by $Month$, and in both cases users reviewed these less than $Daily$. The high amount of average daily reviews indicates users tend to rate films in bulk. In order to account for potential interference from bulking a slice of time based on days will be defined. In order to calculate the feature on both the test set and the final holdout set the first review date will be chosen as an anchor date, the new time feature will calculate the amount of days compared to that date. Negative days are a non-zero possibility, therefore a numeric feature is optimal.
+
+```{r Days_n_Fucntion, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE }
+
+anchor_date <- min(train$review_date)
+# 1996-01-29
+
+# Floor min date and ceiling ax date by year
+
+days_n <- function(date, start_date = '1996-01-01'){
+  
+  days <- interval(ymd(start_date),date)/days(1)
+  
+  return(days)
+  
+}
+```
+
+The anchor date will be `r anchor_date`. The $Days_{n}$ function will de defined as:
+
+```{=latex}
+\begin{equation*}
+\text{Days}_{n}=interval
+\left(\dfrac{ymd(date_{anchor},date)}{days(1)}\right)
+\end{equation*}
+```
+
+The $R$ package $lubridate$ functions $interval$, $ymd$, and $days$ will be used in this function for calculations.
+
+```{r Days_n_add, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+train <- train %>% 
+  mutate(days_n = days_n(review_date)) %>% 
+  relocate(days_n, .after = review_date)
+```
+
+## Genres
+
+There are a total of ${`r genre_max`}$ levels. Given the training methodology that was defined this will result in significantly increased processing. In order to optimize processing time a new feature based on genres will be developed utilizing K-Modes Clustering[^8]. This will require the use of the $R$ package $klaR$. For the purposes of our model the K-Modes model will use a dataset of genres levels based on the train dataset when filtered to distinct films.
+
+[^8]: [https://medium.com/\@shailja.nitp2013/k-modesclustering-ef6d9ef06449](https://medium.com/@shailja.nitp2013/k-modesclustering-ef6d9ef06449){.uri}
+
+### Genre Near Zero Variance
+
+```{r Genre_NZV, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+film_genres <- train %>% 
+  distinct(movie_id, .keep_all = TRUE) %>% 
+  dplyr::select(c(movie_id, starts_with('genre_')))
+
+film_genre_tidy <- film_genres %>%
+  pivot_longer(
+    cols = starts_with('genre_'),
+    names_to = 'genre_level',
+    values_to = 'genre',
+    names_transform = list(genre_level = ~ as_factor(str_remove(.x, 'genre_'))))
+
+genre_cut <- film_genre_tidy %>% 
+  group_by(genre_level) %>% 
+  add_count(name = 'level_n') %>% 
+  group_by(genre_level, genre) %>% 
+  summarise(frequency = n()/first(level_n)) %>% 
+  ungroup() %>% 
+  filter(genre == 'None') %>% 
+  filter(frequency <= 0.50) %>% 
+  pull(genre_level) %>% 
+  as.character() %>% 
+  as.numeric()
+```
+
+For practical purposes genres genre levels with less than a $\dfrac{50}{50}$ frequency for genre $None$ will be removed. Using this cutoff limitation the genre level cutoff will be level ${`r genre_cut`}$. The available genres from across all levels will be:
+
+```{r Genre_Replace_Nos, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, include=TRUE, results='asis'}
+genre_list <- train %>% 
+  summarise(across(starts_with('genre_'), \(x) toString(unique(x)))) %>% 
+  pivot_longer(everything()) %>% 
+  separate_longer_delim(cols = 'value',
+                        delim = ', ') %>% 
+  distinct(value) %>% 
+  pull(value)
+  
+#cat(paste0('* ',genre_list ,'\n'))
+```
+
+\pagebreak
+
+### K-Modes Clustering
+
+In order to apply K-modes effectively the genre (no genre listed) will be changed to None. The mean rating for the interaction of the two genre levels can be explored in the following heat map.
+
+```{r Genre_Preparations, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+film_genres <- film_genres %>% 
+  mutate(across(starts_with('genre_'),\(x) str_replace(x,'\\([[:alpha:][:space:]]+\\)','None')))
+
+film_genres <- film_genres %>% 
+  dplyr::select(-all_of(str_c('genre',3:8, sep = '_')))
+
+genre_means <- train %>% 
+  mutate(across(starts_with('genre_'),\(x) str_replace(x,'\\([[:alpha:][:space:]]+\\)','None'))) %>% 
+  group_by(genre_1,genre_2) %>% 
+  summarise(mean_rating = mean(rating)) %>% 
+  ungroup() %>% 
+  mutate(label = label_number(accuracy = 0.01)(mean_rating))
+```
+
+```{r Genre_Heatmap, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+genre_means %>% 
+  ggplot(aes(genre_1, genre_2, fill = mean_rating, label = label)) +
+  geom_tile() +
+  geom_text(color = '#FFFFFF') +
+  scale_fill_continuous('Rating',high = "#132B43", low = "#56B1F7") +
+  xlab('Genre 1') +
+  ylab('Genre 2') +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+```
+
+There are clear distinctions between the interactions of these two genre levels therefore K-Modes clustering is a viable technique for our modeling purposes.
+
+```{r K-Modes, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+genre_levels <- unique(film_genres$genre_1)
+
+genre_max <- film_genres[,-1] %>% 
+  distinct() %>% 
+  nrow()
+
+film_genres_num <- film_genres %>% 
+  mutate(across(starts_with('genre_'), \(x) as.numeric(factor(x,levels = genre_levels))))
+
+kmodes_withindiff <- function(data, modes, seed = 1443){
+  
+  suppressWarnings(set.seed(seed = seed, sample.kind = 'Rounding'))
+  withindiff <- sum(klaR::kmodes(data, modes = modes, iter.max = 10, weighted = TRUE, fast = TRUE)$withindiff)
+  
+  return(withindiff)
+  
+}
+
+plan(multisession, workers = working_cores)
+
+genre_withindiff <- tibble(genres = 1:genre_max,
+                           withindiff = future_map_dbl(genres,\(x) kmodes_withindiff(film_genres_num[,-1],x),
+                                                .progress = TRUE)
+                           )
+
+plan(sequential)
+```
+
+```{r K-Modes_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+genre_withindiff %>% 
+  ggplot(aes(genres, withindiff)) +
+  geom_point() +
+  geom_line() +
+  geom_smooth(se = FALSE, method = 'lm') +
+  geom_text_repel(aes(label = as.character(genres))) +
+  xlab('Genres') +
+  ylab('Weighted within-cluster distance') +
+  ggtitle('Genre Cluster Analysis')
+```
+
+```{r K-Modes_Clusters, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+genres_clusters <- genre_withindiff %>% 
+  mutate(prop = withindiff/sum(withindiff),
+         c_prop = cumsum(prop)) %>% 
+  filter(c_prop <= 0.8) %>% 
+  slice_max(c_prop) %>% 
+  pull(genres)
+```
+
+Typically $22$ would be chosen as the optimal amount of genre clusters, however in this instance the amount of explained variance would remain too low. Therefore the optimal clusters will be determined by the amount which captures at least $80\%$ of the variance. The optimal number of clusters will therefore be ${`r genres_clusters`}$. This value coincides with the first significant flat-line on the Genre Cluster Analysis Plot.
+
+```{r K-Modes_Calculation, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+set.seed(seed = 1443, sample.kind = 'Rounding')
+genre_model <- klaR::kmodes(film_genres_num[,-1], modes = genres_clusters,
+                      weighted = TRUE)
+
+film_genres <- film_genres %>% 
+  mutate(genre = as.factor(genre_model$cluster))
+
+train <- train %>% 
+  mutate(across(starts_with('genre_'),\(x) str_replace(x,'\\([[:alpha:][:space:]]+\\)','None'))) %>% 
+  left_join(dplyr::select(film_genres,-all_of(str_c('genre',1:2,sep = '_'))),
+            by = 'movie_id') %>%
+  relocate(genre, .before = 'genre_1') %>% 
+  dplyr::select(-starts_with('genre_'))
+```
+
+```{r K-Modes_Genre_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+film_genres %>% 
+  pivot_longer(cols = starts_with('genre_'),
+               names_to = 'level',
+               values_to = 'genre_name',
+               names_transform = \(x) as.integer(str_extract(x,'[:digit:]+$'))) %>% 
+  group_by(genre, genre_name) %>% 
+  summarise(level = toString(sort(unique(level)))) %>% 
+  ungroup() %>% 
+  ggplot(aes(genre, genre_name, fill = genre, label = as.character(level))) +
+  geom_tile(show.legend = FALSE) +
+  geom_text() +
+  xlab('Genre Cluster') +
+  ylab('Genre')
+```
+
+Visualizing the Genre Clusters we can observe significant that there is significant amount of vertical white space which implies that the chosen genre cluster minimizes the amount of genres with no interaction.
+
+\pagebreak
+
+# Feature Selection
+
+Having engineered new features the next step will be to select features which are expected to improve the model. This will be done in to major steps, one using Filter method and another using Wrapper methods. As an initial selection $timestamp$, $title$, and $date_{review}$ will be removed manually as these features are
+
+```{r Feature_Selection, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+train <- train %>% 
+  relocate(rating) %>% 
+  dplyr::select(-all_of(c('timestamp','title','review_date')))
+```
+
+## Filter Selection
+
+### Near Zero Variance Predictors
+
+Near Zero Variance will be performed using the $nearZeroVar$ function from the $r$ package $caret$ using the standard $\dfrac{95}{5}$ frequency cutoff.
+
+```{r Near_ZeroVariance_Calculation, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+nzv_names <- nearZeroVar(train[,-1],
+            names = TRUE,
+            saveMetrics = TRUE,
+            foreach = TRUE,
+            allowParallel = TRUE) %>% 
+  tibble::rownames_to_column(var = 'feature') %>% 
+  as_tibble()
+```
+
+```{r Near_ZeroVariance_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+nzv_summary_names <- names(nzv_names) %>% 
+  str_replace('_',' ') %>% 
+  str_to_title()
+nzv_summary_table <- kbl(nzv_names, col.names = nzv_summary_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+nzv_summary_table
+```
+
+As seen from the results from analyzing feature variance, there are no predictors which have near zero variance. No features will be removed at this time.
+
+### Correlated Numeric Predictors
+
+This section will cover the selection of predictors which have a pairwise pearson correlation coefficient greater then or equal to $0.9$. Removal recommendations will be provided by the $findCorrelation$ function from the $r$ package $caret$ .
+
+```{r Correlated_Numeric, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+train_num <- train %>% 
+  mutate(across(where(is.ordered),as.numeric)) %>% 
+  dplyr::select(where(is.numeric) & -all_of('rating'))
+
+train_cor <- cor(train_num)
+
+cor_remove <- findCorrelation(train_cor, names = TRUE)
+```
+
+```{r Correlated_Numeric_plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+ggcorrplot(train_cor,
+           type = 'lower',
+           ggtheme = ggplot2::theme_bw(),
+           hc.order = TRUE,
+           lab = TRUE,
+           lab_size = 3#,
+           # p.mat = train_cor_pmat
+           )
+```
+
+The recommended features to remove are:
+
+```{r Correlated_Numeric_remove, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, include=TRUE, results='asis'}
+
+#cat(paste0('* ',cor_remove ,'\n'))
+```
+
+However $film\_age$ will be swapped for $release\_year$ as the former is a static feature for films and $film\_age$ will dynamically change and be applicable to users.
+
+The removed features will be:
+
+```{r Correlated_Numeric_remove_2, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, include=TRUE, results='asis'}
+
+cor_remove[which(cor_remove %in% 'film_age')] <- 'release_year'
+
+train <- train %>% 
+  dplyr::select(-all_of(cor_remove))
+
+#cat(paste0('* ',cor_remove ,'\n'))
+```
+
+### Correlated Categorical Predictors
+
+Categorical correlations will be calculated using Cramer's V[^9][^10]. This measure functions similar to the pearson correlation coefficient measure for numeric values, however strength of association ranges from $0$ to $1$.
+
+[^9]: <https://www.spss-tutorials.com/cramers-v-what-and-why/>
+
+[^10]: <https://www.ibm.com/docs/en/cognos-analytics/11.1.0?topic=terms-cramrs-v>
+
+The formula to calculate Cramer's V is:
+
+```{=latex}
+\begin{equation*}
+V_{cramer's}=\sqrt{\dfrac{\chi^2}{N(k-1)}}
+\end{equation*}
+```
+
+Where $\chi^2$ is the Pearson's chi-square test of independence, $N$ is the sample size, and $k$ is the smaller number of categories from both pair that is being tested.
+
+The interpretation of the effect size will be use the following table as a guide:
+
+```{r Cramers_V_Reference, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+cramers_reference <- tibble::tibble(
+  coef = c('$V\\leq0.2$','$0.2<V\\leq0.6$','$>0.6$'),
+  interpretation = c('Categories are weakly associated.',
+                     'Categories are moderately associated.',
+                     'The categories have strong association.')
+)
+
+cramers_reference_names <- c("Cramer's V Coefficient",'Interpretation')
+
+cramers_reference_table <- 
+kbl(cramers_reference, col.names = cramers_reference_names, booktabs = TRUE, escape = FALSE,
+    format.args = list(big.mark = ","), align = c('cl')) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+cramers_reference_table
+```
+
+The calculation will performed using the $cramerV$ function from the $rcompanion$ package. For piratical purposes the association of users and film will not be calculated and will have a value of $0$.
+
+```{r Cramers_V_calculation, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+
+  cramerv_ass <- function(data, verbose = FALSE, bias.correct = TRUE){
+  
+  # Keep Nominal Categories
+  data <- data %>% 
+    dplyr::select(where(is.factor) & !where(is.ordered))
+  
+  # Get Data names
+  data_names <- data %>% 
+    names()
+  
+  # Prepare empty assosiation matrix
+  cramer_v <- matrix(nrow = ncol(data), ncol = ncol(data))
+  
+  colnames(cramer_v) <- data_names
+  rownames(cramer_v) <- data_names
+  
+  for(i in 1:ncol(data)){
+    for(n in 1:ncol(data)){
+      
+      if(i==n){
+        
+        cramer_v[i,n] <- 1
+        
+      }
+      else{
+        if((i==1 & n==2)|(i==2 & n==1)){
+          
+          # Film-User interaction not considered for model
+          
+          cramer_v[i,n] <- 0
+          
+        }
+        else{
+          
+          cramer_v[i,n] <- cramerV(x = data[,i][[1]], data[,n][[1]], verbose = verbose,
+                                   bias.correct = bias.correct)
+          
+        }
+      }
+    }
+  }
+  
+  return(cramer_v)
+  
+}
+
+train_cat_corr <- cramerv_ass(train)
+
+cat_cor_remove <- findCorrelation(train_cat_corr, names = TRUE,
+                cutoff = 0.6)
+```
+
+```{r Cramers_V_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+ggcorrplot(train_cat_corr,
+                                    type = 'lower',
+                                    ggtheme = ggplot2::theme_bw(),
+                                    hc.order = TRUE,
+                                    lab = TRUE,
+                                    digits = 3) +
+  scale_fill_gradient2(limit = c(0,1),
+                       low = '#0000FF',
+                       high = '#FF0000',
+                       mid = '#FFFFFF',
+                       midpoint = 0.4)
+```
+
+The recommended features for removal are:
+
+```{r Cramers_V_Remove, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, include=TRUE, results='asis'}
+
+#cat(paste0('* ',cat_cor_remove ,'\n'))
+```
+
+Considering that $user\_id$ is a core predictor and therefore will not be removed, $is\_am$ will be removed instead as it's correlated predictor. Both $genre$ and $movie\_id$ are nearly perfectly correlated. This is expected as $genre$ was engineered via K-Modes Clustering from the distinct film genre list, what this confirms however is that an interaction between $movie\_id$ and $genre$ for model training should not be pursued. Taking these into consideration only $is\_am$ will be removed.
+
+```{r Cramers_V_Remove_2, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+cat_cor_remove <- 'is_am'
+
+train <- train %>% 
+  dplyr::select(-all_of(cat_cor_remove))
+```
+
+### Linear Combinations
+
+For the final filter selection technique will remove features where numerical vectors are linear combinations of each other. This will be performed using the $caret$ function $findLinearCombos$.
+
+```{r Linear_Combos_Calculation, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+
+train_num <- train %>% 
+  mutate(across(where(is.ordered),as.numeric)) %>% 
+  dplyr::select(where(is.numeric) & -all_of('rating'))
+
+train_lc <- findLinearCombos(train_num)
+
+is_empty <- function(x) {
+  if (is.null(x)) {
+    return(c('No Linear Combos'))
+  } else {
+    return(x)
+  }
+}
+
+train_lc_remove <- is_empty(train_lc$remove)
+```
+
+The analysis of linear combos return the following result:
+
+```{r Linear_Combos_Remove, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, include=TRUE, results='asis'}
+
+#cat(paste0('* ',train_lc_remove ,'\n'))
+```
+
+As no linear combos were found this analysis will not remove any features.
+
+\pagebreak
+
+## Wrapper Selection
+
+Feature Selection via wrapper methods is categorized by applying a selection of predictors for a model using a machine learning algorithm. It is most often used when dealing with large feature spaces. The following section will apply two methods in order to reduce the amount of predictors prior to training. In this particular case as training will be one using an analytical solution it is expected to reduce training time significantly.
+
+### Boruta
+
+The Boruta Feature Selection Algorithm[^11][^12] applies a random forest algorithm, however it gauges the importance of a feature utilizing the $Z-Score$ in relation to the response variable when compared to a randomized feature called $\text{Shadow Features}$., features that do not perform better than the $\text{Shadow Features}$ are removed.
+
+[^11]: <https://www.datacamp.com/tutorial/feature-selection-R-boruta>
+
+[^12]: <https://www.analyticsvidhya.com/blog/2016/03/select-important-variables-boruta-package/>
+
+Since the expected model follows a $\hat{Y}=\text{User Effects}+\text{Film Effects}+\text{Overall Effects (Intercept)}$ form, a boruta analysis will be performed twice, once to gauge user effects and another for film effects.
+
+#### Boruta Users
+
+```{r Boruta_User, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+set.seed(2148, sample.kind = 'Rounding')
+user_boruta <- Boruta(rating~.,
+                      data = dplyr::select(train,
+                                    -all_of(c('movie_id'))),
+                      getImp = getImpXgboost,
+                      maxRuns = 50,
+                      doTrace = 3)
+```
+
+```{r Boruta_User_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+boruta_interpret <-
+  function(x, title = NULL, subtitle = NULL) {
+    decisions <- tibble(variable = names(as_tibble(x$finalDecision)),
+                        decision = as.character(x$finalDecision))
+    
+    importance <- as_tibble(x$ImpHistory) %>%
+      pivot_longer(cols = everything(),
+                   names_to = 'variable')
+    
+    data <- left_join(importance, decisions) %>%
+      replace_na(list(decision = 'Metric')) %>%
+      mutate(across(where(is.character), as.factor)) %>%
+      mutate(variable = fct_reorder(variable, value, .desc = FALSE))
+    
+    plot <- data %>%
+      ggplot(aes(variable, value, fill = decision)) +
+      geom_boxplot(alpha = 0.25) +
+      geom_jitter(position = position_jitterdodge()) +
+      scale_y_continuous('Importance') +
+      xlab('Predictor') +
+      guides(fill = guide_legend('Decision')) +
+      ggtitle(title, subtitle = subtitle) +
+      coord_flip()
+    
+    return(plot)
+    
+  }
+
+boruta_interpret(user_boruta)
+
+```
+
+Note, $film\_age$ has far greater importance than $user\_id$. The former may be leaking data from $movie\_id$ into this analysis. As such $film\_age$ will be dropped from the entire feature space and User Boruta will be preformed again.
+
+```{r Boruta_User_2, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+set.seed(2148, sample.kind = 'Rounding')
+user_boruta_2 <- Boruta(rating~.,
+                      data = dplyr::select(train,
+                                    -all_of(c('movie_id','film_age'))),
+                      getImp = getImpXgboost,
+                      maxRuns = 50,
+                      doTrace = 3)
+```
+
+```{r Boruta_User_Plot_2, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+boruta_interpret(user_boruta_2)
+```
+
+Having run the analysis with $film\_age$ removed we obtain the following relevant features:
+
+```{r Boruta_User_Keep_List, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, include=TRUE, results='asis'}
+
+user_predictors_2 <- Boruta::getSelectedAttributes(user_boruta_2)#[c(1:3)]
+
+#cat(paste0('* ',user_predictors_2 ,'\n'))
+```
+
+Considering the relative importance with each other feature only the top 3 will be used for user effects.
+
+```{r Boruta_User_Keep, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+user_predictors_keep <- Boruta::getSelectedAttributes(user_boruta_2)[c(1:3)]
+```
+
+Note $user\_id$ remain low. Boruta may not be sufficiently robust to ensure the importance for users effects. Once Boruta for films is concluded an additional wrapper method will be applied for added confidence in feature selection.
+
+\pagebreak
+
+#### Boruta Film
+
+```{r Boruta_Film, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+set.seed(2148, sample.kind = 'Rounding')
+film_boruta <- Boruta(rating~.,
+                      data = dplyr::select(train,
+                                    -all_of(c('user_id','genre','film_age'))),
+                      getImp = getImpXgboost,
+                      maxRuns = 50,
+                      doTrace = 3)
+```
+
+```{r Boruta_Film_Plot_1, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+boruta_interpret(film_boruta)
+```
+
+As far as film effects goes it can be safety be said that $movie\_id$ and $days\_n$ are the relevant features as all others have relatively low importance scores.
+
+```{r Boruta_Film_Keep, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+film_predictors_keep <- Boruta::getSelectedAttributes(film_boruta)[c(1:2)]
+
+```
+
+### Variable Rank
+
+Variable Rank is a feature selection technique based on the concept of entropy[^13] and mutual information[^14]. In the field of Information Theory, entropy is a measure of the uncertainty of a random variable. Mutual information is a special case of entropy where unanticipated outcomes, referred to as the surprise, is calculated for two variables. The $r$ package $varrank$[^15] will be used to calculate a score which demonstrates a variable's relevancy or redundancy in relation to a target variable, in this case $rating$. Due to the size of the dataset the function $varrank$ will be set to use a forward feeding algorithm.
+
+[^13]: <https://youtu.be/YtebGVx-Fxw?si=eHK6kge2OPjnvvRL>
+
+[^14]: <https://youtu.be/eJIp_mgVLwE?si=LJaKXjDCGBJg4H4z>
+
+[^15]: <https://cran.r-project.org/web/packages/varrank/vignettes/varrank.html>
+
+```{r Varrank, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+all_varrank <- varrank(dplyr::select(train,all_of(c('rating',user_predictors_keep,film_predictors_keep))),
+                        method = 'estevez',
+                        variable.important = 'rating',
+                        discretization.method = 'sturges',
+                        algorithm = 'forward',
+                        scheme = 'mid')
+```
+
+```{r Varrank_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+plot(all_varrank)
+```
+
+The above plot visualizes the scores of each variable across the diagonal, with scores under the line being the sores of other variables which have lower scores at that step. In this case the features in order of relevancy is:
+
+```{r Varrank_Order, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, include=TRUE, results='asis'}
+
+best_order <- all_varrank$ordered.var
+
+#cat(paste0('* ',best_order ,'\n'))
+```
+
+No Features will be removed. However we can observe that $user\_id$ and $movie\_id$ is expected to provide the majority of the predictive power followed by $days\_n$. The latter will be trained into each expected effect individually.
+
+\pagebreak
+
+# Training
+
+This section covers the forward stepwise ridge regression training for a model that predicts rating. The form training sequence will be:
+
+1.  $movie\_id$
+
+2.  $user\_id$
+
+3.  $user\_id*days\_n$
+
+4.  $user\_genre$
+
+5.  $movie\_id*days\_n$
+
+$RMSE$ will be evaluated on the Test Set at each step and if a feature, should $RMSE$ not improve the feature in question will be removed from the model.
+
+## Data Pre-processing
+
+Considering that the analytical solution section reveals that the training methodology is in essence a form of mean calculation it will be susceptible to outlines and other issues. To ensure stable training the data will be centered, scaled and a box-cox transformation will be applied. As an added benefit as the data would be centered around zero, the intercept calculation will be zero.
+
+```{r Data_Preparation_and_RMSE_Functions, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+train <- train %>%
+  dplyr::select(all_of(unique(c('rating',all_varrank$ordered.var))))
+
+preprocess_rating_model <- preProcess(as.data.frame(train[,1]),
+                               method = c('center','scale','BoxCox'),
+                               verbose = TRUE)
+
+train_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(train)))
+
+test <- test %>% 
+  left_join(film_genres,
+            by = 'movie_id') %>% 
+  mutate(review_date = as_date(timestamp),
+         days_n = days_n(review_date)) %>% 
+  dplyr::select(all_of(names(train_0)))
+
+test_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(test)))
+
+rmse_calc <- function(data){
+  
+  rmses <- data %>% 
+    summarise(across(starts_with('y_hat'),\(x) RMSE(rating,x))) %>% 
+    pivot_longer(cols = everything(),
+                 names_to = 'model',
+                 values_to = 'rmse',
+                 names_transform = \(x) as.factor(str_to_title(str_replace_all(str_remove(x,'y_hat_'),'_',' ')))) %>% 
+    mutate(model = fct_reorder(model,rmse))
+  
+  return(rmses)
+  
+}
+
+rmse_plot <- function(data, label_accuracy = 0.001, label_nudge = 0.025){
+  
+  plot <- data %>% 
+    ggplot(aes(rmse, model, label = label_number(accuracy = label_accuracy)(rmse))) +
+    geom_segment(aes(xend = 0, yend = model)) +
+    geom_point() +
+    geom_text(nudge_x = label_nudge) +
+    xlab('RMSE') +
+    ylab('Model') +
+    ggtitle('Model RMSE')
+  
+  return(plot)
+  
+}
+```
+
+\pagebreak
+
+## Intercept
+
+The initial feature to train will be the intercept to zero. The $RMSE$ for this feature is:
+
+```{r Train_Intercept, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+b0 <- 0
+
+```
+
+```{r Test_Intercept_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+rmse_table_0 <- test_0 %>% 
+  mutate(intercept = b0,
+         y_hat_intercept = b0) %>% 
+  rmse_calc()
+
+rmse_table_0_names <- c('Model','RMSE')
+
+rmse_table_0_table <- kbl(rmse_table_0, col.names = rmse_table_0_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+rmse_table_0_table
+```
+
+```{r Test_Intercept_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+test_0 %>% 
+  mutate(intercept = b0,
+         y_hat_intercept = b0) %>% 
+  rmse_calc() %>% 
+  rmse_plot(label_nudge = 0.05)
+
+```
+
+The Intercept model has an $RMSE$ of ${`r rmse_table_0[1,2][[1]]`}$.
+
+```{r Train_Betas_Intercept, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0,
+           train_y_hat = rating - b0) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
+```
+
+As this is the intercept there is no $\lambda$ value to optimize.
+
+\pagebreak
+
+## Movie ID
+
+Training the $movie\_id$ feature to $50\text{ }\lambda$ values with a max $\lambda$ of 7 for a total of $5$ repetitions. The large array is chosen in order to improve the capture the global minima. Using these values we can observe the following behavior:
+
+```{r Train_Film, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+repeats <- 5
+lambda_max <- 7
+lambda_length <- 50
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(1432, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'movie_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(movie_id) %>% 
+      summarise(beta = sum(train_y_hat)/(n() + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('movie_id')) %>% 
+      dplyr::select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+```
+
+```{r Train_Film_Lambda_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+```
+
+The model will optimize $RMSE$ for this feature at $\lambda={`r round(lambda_min,4)`}$. Note Than values lower than 2 would have likely a $\lambda$ which perform better than $0$ but it would not be optimized as it is a local minima while this selection has a a greater probability of being the local minima
+
+The performance of this feature in the model is:
+
+```{r Test_Film_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+film_betas <- train_0 %>%
+  group_by(movie_id) %>%
+  summarise(b_film = sum(train_y_hat)/(n() + lambda_min), .groups = 'drop')
+
+rmse_table_0 <- test_0 %>%
+  train_betas() %>%
+  left_join(film_betas) %>%
+  mutate(y_hat_film = b0 + b_film) %>%
+  rmse_calc()
+
+rmse_table_0_names <- c('Model','RMSE')
+
+rmse_table_0_table <- kbl(rmse_table_0, col.names = rmse_table_0_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+rmse_table_0_table
+```
+
+```{r Test_Film_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+test_0 %>%
+  train_betas() %>%
+  left_join(film_betas) %>%
+  mutate(y_hat_film = b0 + b_film) %>%
+  rmse_calc() %>%
+  rmse_plot(label_nudge = 0.05)
+```
+
+$movie\_id$ improves the model to an $RMSE$ of ${`r rmse_table_0[2,2][[1]]`}$.
+
+```{r Betas_Film, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+lambdas_best <- tibble(feature = 'Film',
+                       lambda = lambda_min)
+
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           train_y_hat = rating - b0 - b_film) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
+```
+
+\pagebreak
+
+## User ID
+
+Training the $user\_id$ feature to $50\text{ }\lambda$ values with a max $\lambda$ of $7$ for a total of $5$ repetitions. Exhibits the following behavior:
+
+```{r Train_User, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+repeats <- 5
+lambda_max <- 7
+lambda_length <- 50
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(1834, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'user_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(user_id) %>% 
+      summarise(beta = sum(train_y_hat)/(n() + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('user_id')) %>% 
+      dplyr::select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+```
+
+```{r Train_User_Lambda_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+```
+
+The model $RMSE$ for $user\_id$ will be optimized at $\lambda={`r round(lambda_min,4)`}$.
+
+The performance of this feature when added to the model on the test set is:
+
+```{r Test_User_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+user_betas <- train_0 %>%
+  group_by(user_id) %>%
+  summarise(b_user = sum(train_y_hat)/(n() + lambda_min), .groups = 'drop')
+
+rmse_table_0 <- test_0 %>%
+  train_betas() %>%
+  left_join(user_betas) %>%
+  mutate(y_hat_user = b0 + b_film + b_user) %>%
+  rmse_calc()
+
+rmse_table_0_names <- c('Model','RMSE')
+
+rmse_table_0_table <- kbl(rmse_table_0, col.names = rmse_table_0_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+rmse_table_0_table
+```
+
+```{r Test_User_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+test_0 %>%
+  train_betas() %>%
+  left_join(user_betas) %>%
+  mutate(y_hat_user = b0 + b_film + b_user) %>%
+  rmse_calc() %>%
+  rmse_plot(label_nudge = 0.05)
+```
+
+$user\_id$ improves the model to an $RMSE$ of ${`r rmse_table_0[3,2][[1]]`}$. The feature will be added to the model.
+
+```{r Betas_User, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+lambdas_best <- lambdas_best %>% 
+  add_row(feature = 'User', lambda = lambda_min)
+
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    left_join(user_betas) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           train_y_hat = rating - b0 - b_film - b_user) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
+```
+
+\pagebreak
+
+## User:Days
+
+The feature interaction between $user\_id$ and $days\_n$ will be trained to $100\text{ }\lambda$ values with a max $\lambda$ of $1^{10}$ for a total of $5$ repetitions.
+
+```{r Train_User_Time, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+repeats <- 5
+lambda_max <- 1e10
+lambda_length <- 100
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(1741, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'user_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(user_id) %>% 
+      summarise(beta = sum(train_y_hat * days_n)/(sum(days_n^2) + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('user_id')) %>% 
+      dplyr::select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+```
+
+```{r Train_User_Time_Lambda_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+```
+
+The model $RMSE$ for this interaction feature is optimized at $\lambda={`r lambda_min`}$.
+
+The performance on the test set results showcases the following behavior:
+
+```{r Test_User_Time_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+user_days_betas <- train_0 %>%
+  group_by(user_id) %>%
+  summarise(b_user_days = sum(train_y_hat * days_n)/(sum(days_n^2) + lambda_min), .groups = 'drop')
+
+rmse_table_0 <- test_0 %>%
+  train_betas() %>%
+  left_join(user_days_betas) %>%
+  mutate(y_hat_user_days = b0 + b_film + b_user + b_user_days*days_n) %>%
+  rmse_calc()
+
+rmse_table_0_names <- c('Model','RMSE')
+
+rmse_table_0_table <- kbl(rmse_table_0, col.names = rmse_table_0_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+rmse_table_0_table
+```
+
+```{r Test_User_Time_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+test_0 %>%
+  train_betas() %>%
+  left_join(user_days_betas) %>%
+  mutate(y_hat_user_days = b0 + b_film + b_user + b_user_days*days_n) %>%
+  rmse_calc() %>%
+  rmse_plot(label_accuracy = 0.00001, label_nudge = 0.05)
+```
+
+The interaction feature $days\_n$ with $user\_id$ improves the model $RMSE$ to ${`r rmse_table_0[4,2][[1]]`}$. This effect size was expected given the analysis performed in the wrapper selection analysis.
+
+```{r Betas_User_Time, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+lambdas_best <- lambdas_best %>% 
+  add_row(feature = 'User Days', lambda = lambda_min)
+
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    left_join(user_betas) %>% 
+    left_join(user_days_betas) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           y_hat_user_days = b0 + b_film + b_user + b_user_days * days_n,
+           train_y_hat = rating - b0 - b_film - b_user - b_user_days * days_n) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
+
+```
+
+\pagebreak
+
+## User:Genre
+
+The categorical interaction between $user\_id$ and the engineered feature $genre$ will be trained to $50\text{ }\lambda$ values with a max $\lambda$ of $50$ for a total of $5$ repetitions.
+
+```{r Train_User_Genre, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+repeats <- 5
+lambda_max <- 50
+lambda_length <- 50
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(738, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'user_id') %>% 
+      semi_join(train_set, by = 'genre')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(user_id,genre) %>% 
+      summarise(beta = sum(train_y_hat)/(n() + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('user_id','genre')) %>% 
+      mutate(across('beta',\(x) replace_na(x,0))) %>% 
+      dplyr::select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+```
+
+```{r Train_User_Genre_Lambda_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+```
+
+The feature will be optimized at $\lambda={`r lambda_min`}$.
+
+This feature's performance on the test set:
+
+```{r Test_User_Genre_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+user_genre_betas <- train_0 %>%
+  group_by(user_id,genre) %>%
+  summarise(b_user_genre = sum(train_y_hat)/(n() + lambda_min), .groups = 'drop')
+
+rmse_table_0 <- test_0 %>%
+  train_betas() %>%
+  left_join(user_genre_betas) %>%
+  mutate(b_user_genre = replace_na(b_user_genre,0),
+         y_hat_user_genre = b0 + b_film + b_user + b_user_days*days_n + b_user_genre) %>%
+  rmse_calc()
+
+rmse_table_0_names <- c('Model','RMSE')
+
+rmse_table_0_table <- kbl(rmse_table_0, col.names = rmse_table_0_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+rmse_table_0_table
+```
+
+```{r Test_User_Genre_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+test_0 %>%
+  train_betas() %>%
+  left_join(user_genre_betas) %>%
+  mutate(b_user_genre = replace_na(b_user_genre,0),
+         y_hat_user_genre = b0 + b_film + b_user + b_user_days*days_n + b_user_genre) %>%
+  rmse_calc() %>%
+  rmse_plot(label_accuracy = 0.0001, label_nudge = 0.05)
+```
+
+$user\_id$ and $genre$ interactions improve the model to an $RMSE$ of ${`r rmse_table_0[5,2][[1]]`}$. As with the previous trained feature the improvement to $RMSE$ is minimal but expected.
+
+```{r Betas_User_Genre, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+lambdas_best <- lambdas_best %>% 
+  add_row(feature = 'User Genre', lambda = lambda_min)
+
+# Update train_betas
+train_betas <- function(data){
+  
+  data <-   data %>% 
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>% 
+    left_join(film_betas) %>% 
+    left_join(user_betas) %>% 
+    left_join(user_days_betas) %>% 
+    left_join(user_genre_betas) %>% 
+    mutate(across(starts_with('b_'),\(x) replace_na(x,0))) %>% 
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           y_hat_user_days = b0 + b_film + b_user + b_user_days * days_n,
+           y_hat_user_genre = b0 + b_film + b_user + b_user_days * days_n + b_user_genre,
+           train_y_hat = rating - b0 - b_film - b_user - b_user_days * days_n - b_user_genre) %>% 
+    relocate(train_y_hat, .after = last_col())
+  
+  return(data)
+  
+}
+
+train_0 <- train_0 %>% 
+  train_betas()
+```
+
+\pagebreak
+
+## Movie:Days
+
+The feature $days\_n$ will now be trained with the interaction with $movie\_id$ to $100\text{ }\lambda$ values with a max $\lambda$ of $1^{11}$ for a total of $5$ repetitions.
+
+```{r Train_Film_Time, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+
+repeats <- 5
+lambda_max <- 1e11
+lambda_length <- 100
+lambda_p <- 0.8
+
+lambdas <- expand_grid(lambda = seq(0,lambda_max, length.out = lambda_length),
+                       repeats = 1:repeats,
+                       rmse = 0)
+
+set.seed(636, sample.kind = 'Rounding')
+repetitions <- createDataPartition(y = pull(train_0,train_y_hat),
+                                   times = repeats,
+                                   p = lambda_p,
+                                   list = FALSE)
+
+for (r in 1:repeats) {
+  
+  for (i in 1:lambda_length) {
+    
+    position <- -lambda_length + lambda_length*r + i
+    
+    index <- repetitions[,r]
+    all_names <- names(train_0)
+    
+    train_set <- train_0[repetitions[,r],]
+    temp <- train_0[-repetitions[,r],]
+    
+    test_set <- temp %>% 
+      semi_join(train_set, by = 'movie_id')
+    
+    removed <- suppressMessages(anti_join(temp, test_set))
+    train_set <- rbind(train_set, removed)
+    
+    betas <- train_set %>% 
+      group_by(movie_id) %>% 
+      summarise(beta = sum(train_y_hat * days_n)/(sum(days_n^2) + lambdas$lambda[position]), .groups = 'drop')
+    
+    test_predictions <- test_set %>% 
+      left_join(betas, by = c('movie_id')) %>% 
+      dplyr::select(starts_with('beta')) %>% 
+      as.matrix() %>% 
+      rowSums()
+    
+    test_observations <- pull(test_set,train_y_hat)
+    
+    lambdas$rmse[position] <- RMSE(test_predictions, test_observations)
+    
+    train_message <- paste0(position,'/',repeats*lambda_length,' - \U03BB:',round(lambdas$lambda[position],4),' - RMSE: ',round(lambdas$rmse[position],4))
+    
+    message(train_message)
+    
+  }
+  
+}
+
+rmse_summary <- lambdas %>% 
+  group_by(lambda) %>% 
+  summarise(mean_rmse = mean(rmse))
+
+rmse_min <- rmse_summary %>% 
+  pull(mean_rmse) %>% 
+  min()
+
+lambda_min <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  pull(lambda)
+
+rmse_min_point <- rmse_summary %>% 
+  slice_min(mean_rmse) %>% 
+  mutate(label = paste('lambda',"==",round(lambda,4)))
+```
+
+```{r Train_Film_Time_Lambda_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+rmse_summary %>% 
+  ggplot(aes(lambda, mean_rmse)) +
+  geom_line() +
+  geom_point(data = rmse_min_point,
+             aes(lambda, mean_rmse)) +
+  geom_label_repel(data = rmse_min_point,
+                   aes(lambda, mean_rmse, label = label),
+                   nudge_y = 0.0001,
+                   nudge_x = 0.25,
+                   parse = TRUE) +
+  xlab('Lambda') +
+  ylab('RMSE')
+```
+
+The interaction between $movie\_id$ and $days\_n$ will be optimized at $\lambda={`r lambda_min`}$.
+
+This feature's performance on the test set:
+
+```{r Test_Film_Time_Table, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+film_days_betas <- train_0 %>%
+  group_by(movie_id) %>%
+  summarise(b_film_days = sum(train_y_hat * days_n)/(sum(days_n^2) + lambda_min), .groups = 'drop')
+
+rmse_table_0 <- test_0 %>%
+  train_betas() %>%
+  left_join(film_days_betas) %>%
+  mutate(y_hat_film_days = b0 + b_film + b_user + b_user_days*days_n + b_film_days*days_n) %>%
+  rmse_calc()
+
+rmse_table_0_names <- c('Model','RMSE')
+
+rmse_table_0_table <- kbl(rmse_table_0, col.names = rmse_table_0_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+rmse_table_0_table
+```
+
+```{r Test_Film_Time_Plot, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE, fig.asp=0.8, fig.width=10, fig.align = 'center'}
+
+test_0 %>%
+  train_betas() %>%
+  left_join(film_days_betas) %>%
+  mutate(y_hat_film_days = b0 + b_film + b_user + b_user_days*days_n + b_film_days*days_n) %>%
+  rmse_calc() %>%
+  rmse_plot(label_accuracy = 0.0001)
+
+```
+
+The interactions between$movie\_id$ and $days\_n$ do not improve the model, the $RMSE$ of of the model with this feature is ${`r rmse_table_0[6,2][[1]]`}$. This feature will not be added to the model.
+
+```{r Betas_Final, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+train_betas <- function(data){
+
+  data <-   data %>%
+    mutate(b0 = b0,
+           y_hat_intercept = b0) %>%
+    left_join(film_betas) %>%
+    left_join(user_betas) %>%
+    left_join(user_days_betas) %>%
+    left_join(user_genre_betas) %>%
+    left_join(film_days_betas) %>%
+    mutate(across(starts_with('b_'),\(x) replace_na(x,0))) %>%
+    mutate(y_hat_film = b0 + b_film,
+           y_hat_user = b0 + b_film + b_user,
+           y_hat_user_days = b0 + b_film + b_user + b_user_days * days_n,
+           y_hat_user_genre = b0 + b_film + b_user + b_user_days * days_n + b_user_genre,
+           y_hat_final = b0 + b_film + b_user + b_user_days * days_n + b_user_genre,
+           train_y_hat = rating - b0 - b_film - b_user - b_user_days * days_n - b_user_genre,
+           ) %>%
+    relocate(train_y_hat, .after = last_col())
+
+  return(data)
+
+}
+```
+
+The final model, which will be used to predict on the Final Holdout Data Set will have the following form:
+
+$$
+\hat{Y}=\beta_0+\beta_{film}+\beta_{user}++\beta_{user\times\:days\_n}\times\:days\_n+\beta_{user:genre}
+$$
+
+\pagebreak
+
+# Model Performance
+
+The model performance on the final holdout set is:
+
+```{r Final_Prediction, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+final_holdout_test_f <- final_holdout_test %>% 
+  as_tibble() %>% 
+  clean_names() %>% 
+  dplyr::select(all_of(c('rating','user_id','movie_id','timestamp'))) %>% 
+  mutate(review_date = as_date(as_datetime(timestamp)),
+         user_id = as_factor(user_id),
+         movie_id = as_factor(movie_id),
+         ) %>% 
+  left_join(film_genres) %>% 
+  mutate(days_n = days_n(review_date)) %>% 
+  dplyr::select(any_of(names(train_0)))
+
+final_holdout_test_0 <- as_tibble(predict(preprocess_rating_model,as.data.frame(final_holdout_test_f)))
+
+final_rmse <- final_holdout_test_0 %>% 
+  train_betas() %>% 
+  dplyr::select(all_of(c('rating','y_hat_final'))) %>% 
+  rmse_calc()
+
+rmse_table_0_names <- c('Model','RMSE')
+
+final_rmse_table <- kbl(final_rmse, col.names = rmse_table_0_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+final_rmse_table
+```
+
+The difference in performance on the test set and the final holdout set is minimal. The prediction at the moment lost interpretability due to the transformations that preceded training. This can be reverted in order to restore the interpretation of the prediction to the original 5-Star rating structure. The table below shows an example of 10 observations.
+
+```{r Final_Prediction_Reverted, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+
+reverse_prep <- function(x,
+                         data_prep_model = preprocess_rating_model){
+  
+  # Extract Parameters from Data Prep Model
+  mean_prep <- data_prep_model$mean
+  sd_prep <- data_prep_model$std
+  lambda <- data_prep_model$bc$rating$lambda
+  
+  # Apply Reverse Transformation
+  y <- sd_prep*x + mean_prep # Reverse scaling & centering
+  
+    if (lambda == 0) {
+    y <- exp(y)
+    }
+  else {
+    y <- (y*lambda + 1)^(1/lambda)
+  }
+  
+  # Box-Cox can overshoot original range limits
+  # Limit NAs to minimum rating of 0.5
+  # Limit y>5 to 5
+  y <- ifelse(is.na(y) | is.nan(y), 0.5, y)
+  y <- ifelse(y > 5, 5, y)
+ 
+  return(y)
+  
+}
+
+reverse_prep <- Vectorize(reverse_prep)
+
+rev_sample <- final_holdout_test_0 %>% 
+  train_betas() %>% 
+  dplyr::select(all_of(c('rating','y_hat_final'))) %>% 
+  slice_head(n = 10) %>% 
+  mutate(across(c('rating','y_hat_final'),\(x) reverse_prep(x)))
+
+rev_sample_names <- c('Rating','Predicted Rating')
+
+rev_sample_table <- kbl(rev_sample, col.names = rev_sample_names, booktabs = TRUE, format.args = list(big.mark = ",")) %>% 
+  kable_styling(position = 'center', full_width = FALSE, latex_options = 'hold_position', htmltable_class = 'lightable-classic-2')
+
+rev_sample_table
+```
+
+# Conclusion
+
+The final model reveals that prediction of a rating is dependent of the mean film performance and a user's mean rating behavior along with their days of use of the MovieLens service and their taste in genres.
+
+## Limitations
+
+The model does not take into account genre determinations based on user's input. While genre's were determined based on the listed genres user opinions may differ in such a way that it alters the model. Likewise the current method does not determine the genre clustering in terms of predictive power. Currently there is no procedure for the introduction of new users or films in the model, while the intercept can provide a baseline for new users, films have a large spread of performance as seen in the mean rating distribution. Additional analysis, including a post-hoc analysis of this model, Matrix Factorization methodologies (SVD++, PCA, etc.), and training on non-commercial systems should be considered for performance improvements on this model.
